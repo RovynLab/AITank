@@ -1,4 +1,4 @@
-﻿# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 #!/usr/bin/python
 import sys, os
 # 向上搜索 deps/ 目录, 兼容 labs/ 和 demos/*/ 两层结构
@@ -10,8 +10,37 @@ for _up in (1, 2, 3):
             sys.path.insert(0, _d)
         break
 from Adafruit_MotorHAT import Adafruit_MotorHAT, Adafruit_DCMotor
-from exp3_1_2_MecanumChasis import _m1,_m2,_m3,_m4, stop
-import exp3_2_kinematic as kin
+# 修复: 旧模块名 exp3_1_2_MecanumChasis → 直接本地初始化
+_mh = Adafruit_MotorHAT(addr=0x60)
+_m1 = _mh.getMotor(1)
+_m2 = _mh.getMotor(2)
+_m3 = _mh.getMotor(3)
+_m4 = _mh.getMotor(4)
+def stop():
+    _m1.run(Adafruit_MotorHAT.RELEASE)
+    _m2.run(Adafruit_MotorHAT.RELEASE)
+    _m3.run(Adafruit_MotorHAT.RELEASE)
+    _m4.run(Adafruit_MotorHAT.RELEASE)
+# 修复: 旧模块名 exp3_2_kinematic → 从 lab08 运动学实验导入
+import importlib.util as _ilu
+_here_lab = _here
+_kin_path = os.path.join(_here_lab, 'lab08_kinematic.py')
+if os.path.exists(_kin_path):
+    _spec = _ilu.spec_from_file_location('kin', _kin_path)
+    kin = _ilu.module_from_spec(_spec)
+    _spec.loader.exec_module(kin)
+else:
+    # fallback: 内联最小运动学实现
+    PI = 3.14159265358979
+    _A = 0.14 / 2; _B = 0.135 / 2; _R = 0.06 / 2
+    class _KinFallback:
+        @staticmethod
+        def Kin_Inverse(vx, vy, w):
+            return (vy - vx + w*(_A+_B), vy + vx - w*(_A+_B),
+                    vy - vx - w*(_A+_B), vy + vx + w*(_A+_B))
+        @staticmethod
+        def vToRPM(v): return v / 2 / PI / _R
+    kin = _KinFallback()
 import math
 import time
 import atexit

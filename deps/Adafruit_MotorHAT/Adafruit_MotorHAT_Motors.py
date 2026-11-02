@@ -174,21 +174,17 @@ class Adafruit_DCMotor:
         self._cmd = 0
 
         if (num == 0):
-                 pwm = 8
-                 in2 = 11
-                 in1 = 10
-        elif (num == 1):
-                 pwm = 13
                  in2 = 9
                  in1 = 8
+        elif (num == 1):
+                 in2 = 10
+                 in1 = 11
         elif (num == 2):
-                 pwm = 2
+                 in2 = 12
+                 in1 = 13
+        elif (num == 3):
                  in2 = 15
                  in1 = 14
-        elif (num == 3):
-                 pwm = 7
-                 in2 = 13
-                 in1 = 12
         else:
             raise NameError('MotorHAT Motor must be between 1 and 4 inclusive')
         self.PWMpin = pwm
@@ -206,8 +202,8 @@ class Adafruit_DCMotor:
             self.MC.setPin(self.IN1pin, 0)
             self.MC._pwm.setPWM(self.IN2pin, 0, self._speed*16)
         if (command == Adafruit_MotorHAT.BRAKE):
-            self.MC.setPin(self.IN1pin, 1)
-            self.MC.setPin(self.IN2pin, 1)
+            self.MC.setPin(self.IN1pin, 0)
+            self.MC.setPin(self.IN2pin, 0)
         if (command == Adafruit_MotorHAT.RELEASE):
             self.MC.setPin(self.IN1pin, 0)
             self.MC.setPin(self.IN2pin, 0)
@@ -227,8 +223,8 @@ class Adafruit_Servo:
         self.servonum = num
 
     def write(self,x):
-        y=x/90.0+0.6
-        y=max(y,0.6)
+        y=x/90.0+0.5
+        y=max(y,0.5)
         y=min(y,2.5)
         self.setServoPulse(self.servonum,y)
     
@@ -257,7 +253,8 @@ class Adafruit_MotorHAT:
         self._frequency = freq
         self.motors = [ Adafruit_DCMotor(self, m) for m in range(4) ]
         self.steppers = [ Adafruit_StepperMotor(self, 1), Adafruit_StepperMotor(self, 2) ]
-        self.servos= [ Adafruit_Servo(self,0),Adafruit_Servo(self,1),Adafruit_Servo(self,14),Adafruit_Servo(self,15)]
+        #self.servos= [ Adafruit_Servo(self,0),Adafruit_Servo(self,1),Adafruit_Servo(self,2),Adafruit_Servo(self,3),Adafruit_Servo(self,4),Adafruit_Servo(self,5),Adafruit_Servo(self,6),Adafruit_Servo(self,7)]
+        self.servos= [ Adafruit_Servo(self,m) for m in range(8)]
         self._pwm = PWM(addr, debug=False, i2c=i2c, i2c_bus=i2c_bus)
         self._pwm.setPWMFreq(self._frequency)
 

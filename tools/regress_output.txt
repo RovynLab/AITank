@@ -1,0 +1,118 @@
+======================================================================
+  AITank 全项目回归测试
+  时间: 2026-11-02 02:56:02
+  工作目录: /home/pi/AITank
+======================================================================
+
+--- 环境检查 ---
+  Python: Python 3.13.5
+  PCA9685 @ 0x60: 60: 60 -- -- -- -- -- -- -- -- -- -- -- -- -- -- --
+  默认 I2C 总线: I2C bus=1
+
+======================================================================
+  [1/5] Script 类 (正常跑完退出)
+======================================================================
+  ▶  labs/lab02_motor_direction.py    → PASS (timeout=loop)
+  ▶  labs/lab03_motor_pwm.py    → PASS (timeout=loop)
+  ▶  labs/lab05_wheel_test.py    → PASS
+  ▶  labs/lab08_kinematic.py    → PASS
+
+======================================================================
+  [2/5] Loop 类 (timeout 结束)
+======================================================================
+  ▶  labs/lab04_pwm_servo.py    → FAIL (error)
+      ↳ Traceback (most recent call last):
+  ▶  labs/lab06_mecanum_class.py    → FAIL (error)
+      ↳ Traceback (most recent call last):
+  ▶  labs/lab07_mecanum_global.py    → FAIL (error)
+      ↳ Traceback (most recent call last):
+  ▶  labs/lab09_joystick.py    → FAIL (error)
+      ↳ Traceback (most recent call last):
+  ▶  labs/lab10_ptz_control.py    → FAIL (error)
+      ↳ Traceback (most recent call last):
+
+======================================================================
+  [3/5] Class-Only (import 链)
+======================================================================
+  ▶  labs/lab11_servo_test.py (PCA9685 舵机测试脚本 (无 main))    → PASS
+
+======================================================================
+  [4/5] Demos (--help / import 链)
+======================================================================
+  ▶  demos/flask_web_control/app.py (Flask Web 控制)    → FAIL
+      ↳ Traceback (most recent call last):
+  ▶  demos/object_tracking/ball_track.py (目标追踪 (argparse))    → FAIL
+      ↳ Traceback (most recent call last):
+  ▶  demos/traffic_sign/main.py (交通标志识别 (argparse))    → FAIL
+      ↳ Traceback (most recent call last):
+  ▶  demos/flask_web_control/MecanumChasis.py (Flask 麦轮底盘)    → FAIL
+      ↳ Traceback (most recent call last):
+  ▶  demos/flask_web_control/PTZControl.py (Flask 云台控制)    → FAIL
+      ↳ Traceback (most recent call last):
+  ▶  demos/object_tracking/MecanumChasis.py (追踪麦轮底盘)    → FAIL
+      ↳ Traceback (most recent call last):
+  ▶  demos/object_tracking/PTZControl.py (追踪云台控制)    → FAIL
+      ↳ Traceback (most recent call last):
+  ▶  demos/traffic_sign/MecanumChasis.py (交通标志麦轮底盘)    → FAIL
+      ↳ Traceback (most recent call last):
+
+======================================================================
+  [5/5] AI 实验 (import 链)
+======================================================================
+  ▶  ai/ball_track_simple.py (简单球追踪)    → FAIL
+      ↳ Traceback (most recent call last):
+  ▶  ai/face_recognition.py (人脸识别)    → FAIL
+      ↳ Traceback (most recent call last):
+  ▶  ai/finger.py (手势识别 OpenCV)    → FAIL
+      ↳ Traceback (most recent call last):
+  ▶  ai/finger_v2.py (手势识别 MediaPipe)    → FAIL
+      ↳ Traceback (most recent call last):
+
+======================================================================
+  📊 汇总
+======================================================================
+  ✅ PASS:  5
+  ❌ FAIL:  17
+  📈 通过率: 22.7%
+
+--- ❌ FAIL 明细 ---
+  [loop] labs/lab04_pwm_servo.py
+      Traceback (most recent call last):
+  [loop] labs/lab06_mecanum_class.py
+      Traceback (most recent call last):
+  [loop] labs/lab07_mecanum_global.py
+      Traceback (most recent call last):
+  [loop] labs/lab09_joystick.py
+      Traceback (most recent call last):
+  [loop] labs/lab10_ptz_control.py
+      Traceback (most recent call last):
+  [demo] demos/flask_web_control/app.py
+      Traceback (most recent call last):
+  [demo] demos/object_tracking/ball_track.py
+      Traceback (most recent call last):
+  [demo] demos/traffic_sign/main.py
+      Traceback (most recent call last):
+  [demo] demos/flask_web_control/MecanumChasis.py
+      Traceback (most recent call last):
+  [demo] demos/flask_web_control/PTZControl.py
+      Traceback (most recent call last):
+  [demo] demos/object_tracking/MecanumChasis.py
+      Traceback (most recent call last):
+  [demo] demos/object_tracking/PTZControl.py
+      Traceback (most recent call last):
+  [demo] demos/traffic_sign/MecanumChasis.py
+      Traceback (most recent call last):
+  [ai] ai/ball_track_simple.py
+      Traceback (most recent call last):
+  [ai] ai/face_recognition.py
+      Traceback (most recent call last):
+  [ai] ai/finger.py
+      Traceback (most recent call last):
+  [ai] ai/finger_v2.py
+      Traceback (most recent call last):
+
+======================================================================
+  ✅ 回归测试完成
+======================================================================
+
+--- STDERR ---
