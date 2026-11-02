@@ -1,0 +1,14 @@
+{
+	"folders": [
+		{
+			"path": "../ev3/trunk/doc/code/aiTank"
+		},
+		{
+			"path": "."
+		}
+	],
+	"trae": {
+		"workspaceId": "ed3448be23c09f9944765f3ebd46fef2"
+	},
+	"settings": {}
+}
