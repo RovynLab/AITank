@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta charset="UTF-8">
+    <!-- 引入 element-ui 预设css样式-->
+    <link rel="stylesheet" href="https://unpkg.com/element-ui/lib/theme-chalk/index.css">
+    <!-- 引入自定css样式-->
+    <link rel="stylesheet" href="static/css/style1.css">
+</head>
+
+<body>
+
+    <div id="app" class="bg1">
+
+        <!--页面分为两部分，header头部和container内容页面-->
+        <header class="el-header">
+            <h1 class="title">
+                智能小车控制面板</h1>
+            <img src="static/images/shapes/shape-1.png" class="bg-shape1">
+        </header>
+
+        <!--container内容页面中，分为main主页面和aside边栏-->
+        <section class="el-container">
+            <main class="el-main">
+                <!--在main主页面中播放视频流-->
+                <img class="video" src="{{ url_for('video_feed') }}"></main>
+            <!--aside边栏放置按钮-->
+            <aside class="el-aside">
+                <!--云台控制按键-->
+                <div id='ptz-ctrl'>
+
+                    <!--按键布局采用一个无边框的3*3表格-->
+                    <table cellspacing="8" style="padding: 5px;">
+                        <tr>
+                            <td></td>
+                            <td id="top">
+                                <!--type为按键样式，class='ptz'规定了该按钮为ptz云台控制按钮，id能够唯一标识该按钮，便于向后台发送请求，title表示该按钮的实际用途-->
+                                <el-button type="danger" class='ptz' icon="el-icon-caret-top" id="top" title="云台向上"
+                                    circle>
+                                </el-button>
+                            </td>
+                            <td></td>
+                        </tr>
+                        <tr>
+                            <td id="left">
+                                <el-button type="danger" class='ptz' icon="el-icon-caret-left" id="left" title="云台向左"
+                                    circle>
+                                </el-button>
+                            </td>
+                            <td></td>
+                            <td id="right">
+                                <el-button type="danger" class='ptz' icon="el-icon-caret-right" id="right" title="云台向右"
+                                    circle>
+                                </el-button>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td></td>
+                            <td id="buttom">
+                                <el-button type="danger" class='ptz' icon="el-icon-caret-bottom" id="buttom"
+                                    title="云台向下" circle></el-button>
+                                </el-button>
+                            </td>
+                            <td></td>
+                        </tr>
+                        <tr>
+                            <td colspan="3" style="text-align: center;padding: 5px;" class="title3">
+                                控制云台
+                            </td>
+                        </tr>
+                    </table>
+                </div>
+
+                <!--小车控制按键-->
+                <div id='base-ctrl' style="display: block;padding-top: 30px;margin-left: 50px;">
+                    <table cellspacing="8" style="padding: 5px;">
+                        <tr>
+                            <td>
+                                <!--type为按键样式，class='base'规定了该按钮为小车控制按钮，id能够唯一标识该按钮，便于发送后台请求，title表示该按钮的实际用途-->
+                                <el-button type="primary" class='base' icon="el-icon-top-left" id="b-topleft"
+                                    title="小车向左前" circle></el-button>
+                            </td>
+                            <td>
+                                <el-button type="primary" class='base' icon="el-icon-top" id="b-top" title="小车向前"
+                                    circle>
+                                </el-button>
+                            </td>
+                            <td>
+                                <el-button type="primary" class='base' icon="el-icon-top-right" title="小车向右前"
+                                    id="b-topright" circle>
+                                </el-button>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td>
+                                <el-button type="primary" class='base' icon="el-icon-back" id="b-left" title="小车向左"
+                                    circle>
+                                </el-button>
+                            </td>
+                            <td>
+                                <el-button type="primary" class='base' icon="el-icon-remove-outline" title="小车停止"
+                                    id="b-stop" circle>
+                                </el-button>
+                            </td>
+                            <td>
+                                <el-button type="primary" class='base' icon="el-icon-right" id="b-right" title="小车向右"
+                                    circle>
+                                </el-button>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td>
+                                <el-button type="primary" class='base' icon="el-icon-bottom-left" id="b-btmleft"
+                                    title="小车向左后" circle>
+                                </el-button>
+                            </td>
+                            <td>
+                                <el-button type="primary" class='base' icon="el-icon-bottom" id="b-btm" title="小车向后"
+                                    circle>
+                                </el-button>
+                            </td>
+                            <td>
+                                <el-button type="primary" class='base' icon="el-icon-bottom-right" id="b-btmright"
+                                    title="小车向右前" circle>
+                                </el-button>
+                            </td>
+
+
+                        </tr>
+                    </table>
+                
+                        <el-row style="margin-left: 10px;">
+                            <el-button type="primary" class='base' icon="el-icon-refresh-left" id="b-turnleft"
+                                title="小车左转" style="padding:10px" plain>左转
+                            </el-button>
+                            <el-button type="primary" class='base' icon="el-icon-refresh-right" id="b-turnright"
+                                title="小车右转"  style="padding:10px" plain>右转
+                            </el-button>
+                        </el-row>
+                    <h4  class="title3">
+                        控制小车
+                    </h4>
+
+
+                    <!--向左、向右按键-->
+
+                </div>
+            </aside>
+
+
+
+
+        </section>
+
+
+
+    </div>
+</body>
+<!-- import Vue before Element -->
+<script src="https://unpkg.com/vue/dist/vue.js"></script>
+<!-- import JavaScript -->
+<script src="https://unpkg.com/element-ui/lib/index.js"></script>
+<script>
+    //此处编写JavaScript代码
+    //初始化一个vue框架，便于我们使用element-ui的样式库
+    new Vue({
+        el: '#app',
+        data: function () {
+            return { visible: false }
+        }
+    })
+
+
+    //找到所有控制云台运动的按钮   
+    var button = document.getElementsByClassName('ptz');
+
+    //找到所有控制小车运动的按钮
+    var button2 = document.getElementsByClassName('base');
+
+    //为每一个云台控制按钮添加XMLHttpRequest对象，发送get请求，调用后台函数，操纵云台运动
+    for (i = 0; i < button.length; i++) {
+
+        button[i].onclick = function () {
+
+            var xmlhttp;
+            console.log(this.id)
+            if (window.XMLHttpRequest) {//IE7+, Firefox, Chrome, Opera, Safari
+                xmlhttp = new XMLHttpRequest();
+            }
+            else {//IE6, IE5
+                xmlhttp = new ActiveXObject("Microsoft.XMLHTTP");
+            }
+
+            xmlhttp.open("GET", "/ptz/" + this.id, true);//向后台发送请求，请求方式为get，请求链接为localhost:5000/ptz/当前按键的id
+
+            xmlhttp.send();
+
+        }
+
+    }
+
+    //为每一个小车控制按钮添加XMLHttpRequest对象，发送get请求，调用后台函数，操纵小车运动
+
+    for (i = 0; i < button2.length; i++) {
+
+        button2[i].onclick = function () {
+
+            var xmlhttp;
+            console.log(this.id)
+            if (window.XMLHttpRequest) {//IE7+, Firefox, Chrome, Opera, Safari
+                xmlhttp = new XMLHttpRequest();
+            }
+            else {//IE6, IE5
+                xmlhttp = new ActiveXObject("Microsoft.XMLHTTP");
+            }
+
+            xmlhttp.open("GET", "/base/" + this.id, true);//向后台发送请求，请求方式为get，请求链接为localhost:5000/base/当前按键的id
+
+            xmlhttp.send();
+
+        }
+
+    }
+
+
+
+
+</script>
+
+</html>

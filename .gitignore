@@ -1,0 +1,68 @@
+# ============================================================================
+# AI Tank GitHub 仓库 .gitignore
+# 大二进制 / 设计图 / 编译产物 / 旧备份 一律不进 Git
+# ============================================================================
+
+# Python 编译产物
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+*.dist-info/
+
+# wheel 二进制依赖 —— 用 pip install 替代
+*.whl
+
+# 视频 / 大模型 / 压缩包
+*.mp4
+*.avi
+*.mov
+*.zip
+*.rar
+*.7z
+*.tar
+*.gz
+*.bak
+*.tmp
+
+# CAD / 设计图 (二进制)
+*.dwg
+*.dxf
+*.dwl
+*.log
+*.err
+*.db
+
+# Office 文档 (二进制)
+*.docx
+*.xlsx
+*.pptx
+*.pdf
+~$*
+
+# 系统文件
+.DS_Store
+.DS_Store?
+Thumbs.db
+ehthumbs.db
+
+# 虚拟环境
+.venv/
+venv/
+env/
+.env
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# 运行时输出
+output/
+test_output/
+*.dat
+
+# 大 tflite 模型 (>20MB 的忽略, 小的保留)
+*.tflite.bak

@@ -1,0 +1,82 @@
+.el-header{
+	height: 100px;
+	min-width:800px;
+}
+
+.el-aside{
+	width: 650px;
+	z-index: 1;
+	border-left: 1px dashed gray;
+}
+
+.el-main{
+	min-width:800px;
+}
+
+.title{
+	background: #EEE url(data:image/gif;base64,iVBORw0KGgoAAAANSUhEUgAAAAQAAAAECAIAAAAmkwkpAAAAHklEQVQImWNkYGBgYGD4//8/A5wF5SBYyAr+//8PAPOCFO0Q2zq7AAAAAElFTkSuQmCC) repeat;
+	text-shadow: 5px -5px #5a5f66, 4px -4px white;
+	font-weight: bold;
+	-webkit-text-fill-color: transparent;
+	-webkit-background-clip: text;
+	padding-left: 20%;
+	padding-top: 35px;
+	color: midnightblue;
+	font-size: 30px;
+
+}
+.bg1 {
+	position: relative;
+    display: block;
+	padding: 0px;
+	z-index: 0;
+	background: #f3f7fc;
+	font-family: "Helvetica Neue",Helvetica,"PingFang SC","Hiragino Sans GB","Microsoft YaHei","微软雅黑",Arial,sans-serif;
+}
+
+
+.bg-shape1 {
+	position: absolute;
+	top: 0;
+	right: 0;
+	z-index: -1;
+
+}
+
+.el-container{
+	height: 600px;
+}
+.video{
+	float: left;
+	z-index:1;
+	border-radius: 15px;
+	box-shadow: 0 2px 4px rgba(0, 0, 0, .12), 0 0 6px rgba(0, 0, 0, .04) ;
+	margin-left:100px;
+	width: 640px;
+
+}
+
+
+.title3{
+
+		color: transparent;
+		background-color : #393b3d;
+		text-shadow : rgba(255,255,255,0.5) 0 5px 6px, rgba(255,255,255,0.2) 1px 3px 3px;
+		-webkit-background-clip : text;
+		font-weight: bold;
+ 
+ }
+
+#ptz-ctrl{
+	display: block;
+	padding-top: 50px;
+	margin-left: 50px;
+ }
+
+
+
+ h4{
+	padding: 5px;
+	margin-left: 50px
+ }
+
