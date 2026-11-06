@@ -42,22 +42,32 @@ class PID:
 
 
 class PIDTracker:
-    """后台线程: 检测目标 → PID → 驱动云台。target: face | color"""
+    """后台线程: 检测目标 → 视觉伺服 → 驱动云台。target: face | color | tennis
+
+    控制律: 绝对角度视觉伺服 (非增量式 PID)
+      目标角 = 当前角 - 误差px / PX_PER_DEG * 增益
+    每帧直接对准, 不累积增量, 无延迟超调振荡。
+    面板 Kp 滑条即增益 (kp*25): 1.0=一步对准, <1 更阻尼, >1 会振荡。
+    Ki/Kd 不再参与。"""
 
     DEADZONE = 12        # 像素死区, 小于此不动 (防抖)
-    LOST_TIMEOUT = 3.0   # 丢目标超过此秒数则积分清零
+    LOST_TIMEOUT = 3.0   # 丢目标超过此秒数则清平滑状态
+    PX_PER_DEG = 10.0    # 640px / 水平FOV约64°
+    MAX_STEP = 10.0      # 单次最大修正角 (度), 防目标重现时猛甩
 
     def __init__(self, camera, ptz, get_color_cfg, log=None):
         self.camera = camera
         self.ptz = ptz
         self.get_color_cfg = get_color_cfg
         self._log = log or (lambda msg: None)
-        self.pid_x = PID()
-        self.pid_y = PID()
+        self.pid_x = PID(kp=0.03, ki=0.0, kd=0.0)   # kp 作为伺服增益
+        self.pid_y = PID(kp=0.03, ki=0.0, kd=0.0)
         self.target = "face"
         self.running = False
         self._thread = None
         self._lock = threading.Lock()
+        self._exs = 0.0     # EMA 平滑后的误差
+        self._eys = 0.0
         # 状态 (供面板实时显示)
         self.err_x = 0.0
         self.err_y = 0.0
@@ -148,10 +158,11 @@ class PIDTracker:
                 h, w = frame.shape[:2]
                 pos = self._find_target(frame)
                 if pos is None:
-                    if time.time() - self.last_seen > self.LOST_TIMEOUT:
-                        self.pid_x.reset()
-                        self.pid_y.reset()
-                        self.last_box = None
+                    lost = time.time() - self.last_seen
+                    if lost > self.LOST_TIMEOUT:
+                        self._exs = self._eys = 0.0
+                    if lost > 0.5:
+                        self.last_box = None   # 红框不残留, 避免误导
                     self.err_x = self.err_y = 0.0
                     self.out_x = self.out_y = 0.0
                     time.sleep(0.06)
@@ -161,27 +172,26 @@ class PIDTracker:
                 self.last_box = box
                 err_x = cx - w / 2.0
                 err_y = cy - h / 2.0
-                with self._lock:
-                    if abs(err_x) < self.DEADZONE:
-                        out_x = 0.0
-                    else:
-                        out_x = self.pid_x.update(err_x)
-                    if abs(err_y) < self.DEADZONE:
-                        out_y = 0.0
-                    else:
-                        out_y = self.pid_y.update(err_y)
                 self.err_x, self.err_y = err_x, err_y
+                # EMA 平滑, 抗检测框抖动 (也平滑导数噪声)
+                self._exs = 0.5 * err_x + 0.5 * self._exs
+                self._eys = 0.5 * err_y + 0.5 * self._eys
+                # 绝对角度视觉伺服: 每帧直接算出应对准的角度, 不累积增量
+                # kp 滑条 0~0.08 → 增益 0~2, 1.0 = 一步对准
+                gain = self.pid_x.kp * 25.0
+                out_x = out_y = 0.0
+                if abs(self._exs) >= self.DEADZONE:
+                    out_x = max(-self.MAX_STEP, min(
+                        self.MAX_STEP, self._exs / self.PX_PER_DEG * gain))
+                    # 目标在右 (err_x>0) → 水平角减小 (look_right 同向)
+                    self.ptz.h_rotate(self.ptz.h_cur - out_x)
+                if abs(self._eys) >= self.DEADZONE:
+                    out_y = max(-self.MAX_STEP, min(
+                        self.MAX_STEP, self._eys / self.PX_PER_DEG * gain))
+                    # 目标在下 (err_y>0) → 垂直角减小 (向下)
+                    self.ptz.v_rotate(self.ptz.v_cur - out_y)
                 self.out_x, self.out_y = out_x, out_y
-                # 目标在右 → 向右看; 在下 → 向下看 (幅度=|PID输出|度)
-                if out_x > 0:
-                    self.ptz.look_right(abs(out_x))
-                elif out_x < 0:
-                    self.ptz.look_left(abs(out_x))
-                if out_y > 0:
-                    self.ptz.look_down(abs(out_y))
-                elif out_y < 0:
-                    self.ptz.look_up(abs(out_y))
-                time.sleep(0.05)
+                time.sleep(0.06)
             except Exception as e:
                 self._log(f"PID 追踪异常: {e}")
                 time.sleep(0.3)

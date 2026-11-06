@@ -97,7 +97,8 @@ def _sys_stats() -> dict:
 
 # ============================================================================
 def create_app(chat=None, emotion=None, mecanum=None, ptz=None, camera=None,
-               mood_engine=None, tts=None, asr=None, skill_manager=None):
+               mood_engine=None, tts=None, asr=None, skill_manager=None,
+               block_service=None):
     """创建 Flask app。所有参数可选, 传了就用, 不传就 Mock/降级"""
     try:
         from flask import Flask, request, jsonify, Response, send_file
@@ -110,6 +111,10 @@ def create_app(chat=None, emotion=None, mecanum=None, ptz=None, camera=None,
     app = Flask(__name__, static_folder=os.path.join(_HERE, "static"))
     log = EventLog()
     log.add("sys", "Flask 已启动")
+
+    def _blocks_busy():
+        """积木程序运行时, 手动运动控制让位, 只保留急停和只读接口"""
+        return bool(block_service and block_service.is_running())
 
     # ASR 一次性识别任务状态
     asr_job = {"running": False, "result": None, "done": False}
@@ -201,6 +206,8 @@ def create_app(chat=None, emotion=None, mecanum=None, ptz=None, camera=None,
             d = request.get_json(silent=True) or {}
             action = d.get("action")
             if action == "start":
+                if _blocks_busy():
+                    return jsonify({"ok": False, "error": "程序正在运行, 请先停止"}), 409
                 pid_tracker.set_params(kp=d.get("kp"), ki=d.get("ki"),
                                        kd=d.get("kd"), target=d.get("target"))
                 pid_tracker.start()
@@ -334,6 +341,8 @@ def create_app(chat=None, emotion=None, mecanum=None, ptz=None, camera=None,
     # ========== /api/base/move ==========
     @app.route("/api/base/move", methods=["POST", "GET"])
     def base_move():
+        if _blocks_busy():
+            return jsonify({"ok": False, "error": "程序正在运行, 请先停止"}), 409
         if request.method == "GET":
             direction = request.args.get("direction", "forward")
             duration = float(request.args.get("duration", 2))
@@ -350,6 +359,8 @@ def create_app(chat=None, emotion=None, mecanum=None, ptz=None, camera=None,
     # ========== /api/base/speed ==========
     @app.route("/api/base/speed", methods=["POST"])
     def base_speed():
+        if _blocks_busy():
+            return jsonify({"ok": False, "error": "程序正在运行, 请先停止"}), 409
         data = request.get_json(silent=True) or {}
         speed = int(data.get("speed", config.MOTOR_NORMAL_SPEED))
         if mecanum:
@@ -361,6 +372,11 @@ def create_app(chat=None, emotion=None, mecanum=None, ptz=None, camera=None,
     # ========== /api/estop ==========
     @app.route("/api/estop", methods=["POST", "GET"])
     def estop():
+        if block_service is not None:
+            try:
+                block_service.stop(estop=True)
+            except Exception:
+                pass
         if mecanum:
             mecanum.stop()
         if camera:
@@ -374,6 +390,8 @@ def create_app(chat=None, emotion=None, mecanum=None, ptz=None, camera=None,
     # ========== /api/ptz ==========
     @app.route("/api/ptz", methods=["POST", "GET"])
     def ptz_api():
+        if _blocks_busy():
+            return jsonify({"ok": False, "error": "程序正在运行, 请先停止"}), 409
         if request.method == "GET":
             direction = request.args.get("direction", "center")
             delta = float(request.args.get("delta", 10))
@@ -641,5 +659,10 @@ def create_app(chat=None, emotion=None, mecanum=None, ptz=None, camera=None,
     @app.route("/dashboard")
     def index():
         return send_file(os.path.join(app.static_folder, "dashboard.html"))
+
+    # ========== 积木编程 ==========
+    if block_service is not None:
+        from .block_api import register_block_api
+        register_block_api(app, block_service)
 
     return app

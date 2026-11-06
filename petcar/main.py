@@ -104,6 +104,17 @@ def _connect_all():
     # VoiceIO
     voice = VoiceIO(asr=asr, tts=tts, chat=chat, emotion=emotion)
 
+    # 积木编程运行时
+    from petcar.blocks.runtime import BlockRuntime
+    from petcar.blocks.service import BlockService
+    block_service = BlockService(BlockRuntime(
+        mecanum=mecanum,
+        ptz=ptz,
+        camera=camera,
+        emotion=emotion,
+        tts=tts,
+    ))
+
     return {
         "oled": oled,
         "mecanum": mecanum,
@@ -116,6 +127,7 @@ def _connect_all():
         "chat": chat,
         "voice": voice,
         "skill_manager": sm,
+        "block_service": block_service,
     }
 
 
@@ -180,6 +192,7 @@ def main():
                 tts=m["tts"],
                 asr=m["asr"],
                 skill_manager=m["skill_manager"],
+                block_service=m["block_service"],
             )
             if app:
                 # 后台线程启动 Flask
@@ -211,6 +224,7 @@ def main():
         print("\nCtrl+C, 退出...")
     finally:
         # 清理
+        m["block_service"].shutdown()
         m["mecanum"].stop()
         m["emotion"].stop()
         m["mood"].stop()

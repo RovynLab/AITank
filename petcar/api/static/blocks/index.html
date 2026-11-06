@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AITank 积木编程</title>
+<link rel="stylesheet" href="/static/blocks/style.css">
+<script src="/static/blocks/vendor/blockly/blockly_compressed.js"></script>
+<script src="/static/blocks/vendor/blockly/blocks_compressed.js"></script>
+<script src="/static/blocks/vendor/blockly/msg/zh-hans.js"></script>
+</head>
+<body>
+<div class="app">
+  <header class="topbar">
+    <div class="brand">
+      <span class="dot"></span>
+      <span>AITank 积木编程</span>
+    </div>
+    <div class="top-actions">
+      <button id="btn-new" class="btn ghost">新建</button>
+      <button id="btn-import" class="btn ghost">导入</button>
+      <button id="btn-export" class="btn ghost">导出</button>
+      <a class="btn ghost" href="/">返回中控</a>
+      <span id="conn" class="conn off">连接中</span>
+    </div>
+  </header>
+
+  <main class="layout">
+    <section id="blocklyDiv" class="workspace"></section>
+
+    <aside class="side">
+      <div class="video-wrap">
+        <img src="/api/video_feed" alt="小车画面" onerror="this.style.display='none'">
+      </div>
+
+      <div class="run-row">
+        <button id="btn-run" class="btn primary">运行</button>
+        <button id="btn-stop" class="btn">停止</button>
+        <button id="btn-estop" class="btn danger">急停</button>
+      </div>
+
+      <div class="status-row">
+        <span id="stateBadge" class="badge idle">空闲</span>
+        <span id="elapsed" class="elapsed">0.0s</span>
+      </div>
+
+      <div class="sees">
+        <span class="sees-label">识别</span>
+        <span id="see-face" class="chip">人脸</span>
+        <span id="see-tennis" class="chip">网球</span>
+        <span id="see-color" class="chip">颜色</span>
+      </div>
+
+      <div class="console-title">控制台</div>
+      <div id="console" class="console"></div>
+    </aside>
+  </main>
+</div>
+
+<input type="file" id="fileInput" accept=".json,application/json" hidden>
+
+<script src="/static/blocks/app.js"></script>
+</body>
+</html>

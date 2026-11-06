@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>小宝中控面板</title>
+<title>AITank 中控面板</title>
 <style>
 :root {
   --bg: #0b0f14;
@@ -153,10 +153,89 @@ input[type=range]::-webkit-slider-thumb {
 .color-presets { display:flex; align-items:center; gap:8px; margin-bottom:12px; }
 .swatch { width:28px; height:28px; border-radius:8px; border:2px solid transparent; cursor:pointer; transition:.15s; }
 .swatch:hover { border-color:#fff; transform:scale(1.1); }
-.hsv-row { display:flex; align-items:center; gap:8px; margin-bottom:8px; }
-.hsv-row input[type=range] { flex:1; min-width:0; accent-color: var(--accent); }
-.hsv-lbl { width:16px; color:var(--muted); font-size:12px; flex-shrink:0; font-family:var(--mono); }
-.hsv-val { width:74px; text-align:right; font-family:var(--mono); font-size:11px; color:var(--accent); flex-shrink:0; }
+.swatch.active { border-color:var(--accent); box-shadow:0 0 8px rgba(52,211,153,.6); }
+
+/* HSV 范围可视化条 */
+.hsv-group { margin-bottom: 14px; }
+.hsv-header { display:flex; align-items:center; gap:10px; margin-bottom:6px; }
+.hsv-header .hsv-lbl { font-family:var(--mono); font-weight:700; color:var(--accent); font-size:13px; width:20px; }
+.hsv-header .hsv-range-meta { font-size:11px; color:var(--muted); margin-left:auto; font-family:var(--mono); }
+.hsv-bar-wrap { position:relative; height:24px; margin-bottom:4px; cursor:pointer; user-select:none; }
+.hsv-bar-bg {
+  position:absolute; left:0; right:0; top:50%; transform:translateY(-50%);
+  height:10px; border-radius:5px; background:rgba(255,255,255,.08); overflow:hidden;
+}
+.hsv-bar-bg.h-gradient { background:linear-gradient(to right,
+  #f00 0%, #ff0 17%, #0f0 33%, #0ff 50%, #00f 67%, #f0f 83%, #f00 100%); }
+.hsv-bar-bg.s-gradient { background:linear-gradient(to right, #000 0%, #fff 100%); }
+.hsv-bar-bg.v-gradient { background:linear-gradient(to right, #000 0%, #fff 100%); }
+.hsv-bar-range {
+  position:absolute; top:50%; transform:translateY(-50%);
+  height:14px; border-radius:7px;
+  background:rgba(52,211,153,.30);
+  border:1.5px solid var(--accent);
+  transition:left .15s, width .15s;
+}
+.hsv-bar-dot {
+  position:absolute; top:50%; transform:translate(-50%, -50%);
+  width:12px; height:12px; border-radius:50%;
+  background:#fff; border:2.5px solid var(--accent);
+  box-shadow:0 0 6px rgba(52,211,153,.7);
+  z-index:2;
+  transition:left .15s;
+}
+.hsv-bar-ticks {
+  display:flex; justify-content:space-between; align-items:baseline;
+  font-size:10px; font-family:var(--mono); color:var(--muted);
+}
+.hsv-bar-ticks .tick-mid { color:var(--accent); font-weight:600; }
+.hsv-bar-ticks .tick-label { color:var(--muted); font-size:9px; }
+
+/* 隐藏原生滑块，保留数据绑定 */
+.hsv-hidden-sliders { display:none; }
+
+/* 当前色预览 */
+.current-color-row {
+  display:flex; align-items:center; gap:12px;
+  margin:12px 0; padding:10px 12px;
+  background:rgba(255,255,255,.03);
+  border:1px solid var(--card-border);
+  border-radius:10px;
+}
+.current-color-swatch {
+  width:44px; height:44px; border-radius:8px;
+  border:2px solid rgba(255,255,255,.2);
+  flex-shrink:0;
+  transition:background .2s;
+}
+.current-color-info { font-size:12px; font-family:var(--mono); line-height:1.5; }
+.current-color-info .rgb-line { color:var(--accent); }
+
+/* HSV 颜色空间可视化（色相×饱和度 渐变画布） */
+.hsv-space-wrap {
+  margin-top:8px;
+}
+.hsv-space-title { font-size:11px; color:var(--muted); margin-bottom:6px; font-family:var(--mono); }
+.hsv-space {
+  position:relative; width:100%; height:110px;
+  border-radius:10px; overflow:hidden;
+  border:1px solid var(--card-border);
+}
+.hsv-space canvas { width:100%; height:100%; display:block; }
+.hsv-space-indicator {
+  position:absolute; top:50%; left:50%;
+  width:14px; height:14px; border-radius:50%;
+  background:#fff; border:2px solid #000;
+  transform:translate(-50%, -50%);
+  box-shadow:0 0 0 1px rgba(255,255,255,.4);
+  pointer-events:none;
+  z-index:2;
+}
+.hsv-v-slider-row {
+  display:flex; align-items:center; gap:8px; margin-top:8px;
+}
+.hsv-v-slider-row input[type=range] { flex:1; accent-color:var(--accent); }
+.hsv-v-slider-row .v-val { font-family:var(--mono); font-size:11px; color:var(--accent); width:40px; text-align:right; }
 
 /* ---------- P2 PID 追踪 ---------- */
 #card-pid { grid-column: span 4; }
@@ -301,8 +380,9 @@ input[type=range]::-webkit-slider-thumb {
 
   <!-- ===== 头部 ===== -->
   <header class="card">
-    <div class="header-title"><span class="paw">🐾</span> 小宝 · 中控面板</div>
+    <div class="header-title"><span class="paw">🐾</span> AITank · 中控面板</div>
     <div class="conn"><span class="dot" id="conn-dot"></span><span id="conn-text">连接中…</span></div>
+    <a class="btn ghost" href="/blocks" style="text-decoration:none;display:inline-flex;align-items:center;justify-content:center;">AITank 积木编程</a>
     <button id="estop" onclick="estop()">急停</button>
   </header>
 
@@ -399,24 +479,92 @@ input[type=range]::-webkit-slider-thumb {
   <div class="card" id="card-color">
     <h2>🎨 颜色识别 <span class="tag">HSV 可调 · PID 颜色追踪复用</span></h2>
     <div class="color-presets">
-      <button class="swatch" style="background:#f44336" title="红" onclick="colorPreset('red')"></button>
-      <button class="swatch" style="background:#ffeb3b" title="黄" onclick="colorPreset('yellow')"></button>
-      <button class="swatch" style="background:#4caf50" title="绿" onclick="colorPreset('green')"></button>
-      <button class="swatch" style="background:#2196f3" title="蓝" onclick="colorPreset('blue')"></button>
+      <button class="swatch" style="background:#f44336" data-preset="red" title="红" onclick="colorPreset('red', this)"></button>
+      <button class="swatch" style="background:#ffeb3b" data-preset="yellow" title="黄" onclick="colorPreset('yellow', this)"></button>
+      <button class="swatch" style="background:#4caf50" data-preset="green" title="绿" onclick="colorPreset('green', this)"></button>
+      <button class="swatch" style="background:#2196f3" data-preset="blue" title="蓝" onclick="colorPreset('blue', this)"></button>
       <button class="btn ghost" id="btn-colorbox" style="margin-left:auto" onclick="toggleColorBox()">画框</button>
     </div>
-    <div class="hsv-row"><span class="hsv-lbl">H</span>
-      <input type="range" id="h_min" min="0" max="180" oninput="hsvInput()">
-      <input type="range" id="h_max" min="0" max="180" oninput="hsvInput()">
-      <b class="hsv-val" id="h_val">--</b></div>
-    <div class="hsv-row"><span class="hsv-lbl">S</span>
-      <input type="range" id="s_min" min="0" max="255" oninput="hsvInput()">
-      <input type="range" id="s_max" min="0" max="255" oninput="hsvInput()">
-      <b class="hsv-val" id="s_val">--</b></div>
-    <div class="hsv-row"><span class="hsv-lbl">V</span>
-      <input type="range" id="v_min" min="0" max="255" oninput="hsvInput()">
-      <input type="range" id="v_max" min="0" max="255" oninput="hsvInput()">
-      <b class="hsv-val" id="v_val">--</b></div>
+
+    <!-- 当前色预览 -->
+    <div class="current-color-row">
+      <div class="current-color-swatch" id="current-color-swatch" style="background:#808080"></div>
+      <div class="current-color-info">
+        <div>H:<span id="cur-h">--</span> S:<span id="cur-s">--</span> V:<span id="cur-v">--</span></div>
+        <div class="rgb-line">RGB(<span id="cur-r">--</span>, <span id="cur-g">--</span>, <span id="cur-b">--</span>)</div>
+      </div>
+    </div>
+
+    <!-- HSV 可视化范围条 -->
+    <div class="hsv-group">
+      <div class="hsv-header">
+        <span class="hsv-lbl">H</span>
+        <span class="hsv-range-meta">范围 0 ~ 180</span>
+      </div>
+      <div class="hsv-bar-wrap" id="h-bar-wrap" data-dim="h" data-min="0" data-max="180">
+        <div class="hsv-bar-bg h-gradient"></div>
+        <div class="hsv-bar-range" id="h-range"></div>
+        <div class="hsv-bar-dot" id="h-dot"></div>
+      </div>
+      <div class="hsv-bar-ticks">
+        <span><span class="tick-label">下限</span> <b id="h-tick-min">--</b></span>
+        <span class="tick-mid">中点 <b id="h-tick-mid">--</b></span>
+        <span><span class="tick-label">上限</span> <b id="h-tick-max">--</b></span>
+      </div>
+    </div>
+
+    <div class="hsv-group">
+      <div class="hsv-header">
+        <span class="hsv-lbl">S</span>
+        <span class="hsv-range-meta">范围 0 ~ 255</span>
+      </div>
+      <div class="hsv-bar-wrap" id="s-bar-wrap" data-dim="s" data-min="0" data-max="255">
+        <div class="hsv-bar-bg s-gradient" id="s-bar-bg"></div>
+        <div class="hsv-bar-range" id="s-range"></div>
+        <div class="hsv-bar-dot" id="s-dot"></div>
+      </div>
+      <div class="hsv-bar-ticks">
+        <span><span class="tick-label">下限</span> <b id="s-tick-min">--</b></span>
+        <span class="tick-mid">中点 <b id="s-tick-mid">--</b></span>
+        <span><span class="tick-label">上限</span> <b id="s-tick-max">--</b></span>
+      </div>
+    </div>
+
+    <div class="hsv-group">
+      <div class="hsv-header">
+        <span class="hsv-lbl">V</span>
+        <span class="hsv-range-meta">范围 0 ~ 255</span>
+      </div>
+      <div class="hsv-bar-wrap" id="v-bar-wrap" data-dim="v" data-min="0" data-max="255">
+        <div class="hsv-bar-bg v-gradient" id="v-bar-bg"></div>
+        <div class="hsv-bar-range" id="v-range"></div>
+        <div class="hsv-bar-dot" id="v-dot"></div>
+      </div>
+      <div class="hsv-bar-ticks">
+        <span><span class="tick-label">下限</span> <b id="v-tick-min">--</b></span>
+        <span class="tick-mid">中点 <b id="v-tick-mid">--</b></span>
+        <span><span class="tick-label">上限</span> <b id="v-tick-max">--</b></span>
+      </div>
+    </div>
+
+    <!-- HSV 颜色空间 (色相×饱和度画布) -->
+    <div class="hsv-space-wrap">
+      <div class="hsv-space-title">HSV 颜色空间 (H × S) · 当前 V 值</div>
+      <div class="hsv-space">
+        <canvas id="hsv-canvas" width="300" height="110"></canvas>
+        <div class="hsv-space-indicator" id="hsv-indicator"></div>
+      </div>
+    </div>
+
+    <!-- 隐藏的原生 range inputs 保持数据绑定 -->
+    <div class="hsv-hidden-sliders">
+      <input type="range" id="h_min" min="0" max="180">
+      <input type="range" id="h_max" min="0" max="180">
+      <input type="range" id="s_min" min="0" max="255">
+      <input type="range" id="s_max" min="0" max="255">
+      <input type="range" id="v_min" min="0" max="255">
+      <input type="range" id="v_max" min="0" max="255">
+    </div>
   </div>
 
   <!-- ===== P2 PID 追踪 ===== -->
@@ -428,13 +576,13 @@ input[type=range]::-webkit-slider-thumb {
       <button class="btn ghost" id="pt-tennis" onclick="pidTarget('tennis')">🎾 网球</button>
     </div>
     <div class="hsv-row"><span class="hsv-lbl">Kp</span>
-      <input type="range" id="pid-kp" min="0" max="0.2" step="0.005" oninput="pidInput()">
+      <input type="range" id="pid-kp" min="0" max="0.08" step="0.002" oninput="pidInput()">
       <b class="hsv-val" id="pid-kp-val">--</b></div>
     <div class="hsv-row"><span class="hsv-lbl">Ki</span>
-      <input type="range" id="pid-ki" min="0" max="0.05" step="0.001" oninput="pidInput()">
+      <input type="range" id="pid-ki" min="0" max="0.05" step="0.001" disabled>
       <b class="hsv-val" id="pid-ki-val">--</b></div>
     <div class="hsv-row"><span class="hsv-lbl">Kd</span>
-      <input type="range" id="pid-kd" min="0" max="0.1" step="0.002" oninput="pidInput()">
+      <input type="range" id="pid-kd" min="0" max="0.1" step="0.002" disabled>
       <b class="hsv-val" id="pid-kd-val">--</b></div>
     <button class="btn" id="btn-pid" style="width:100%;margin:10px 0" onclick="pidToggle()">开始追踪</button>
     <div class="pid-status">
@@ -454,7 +602,7 @@ input[type=range]::-webkit-slider-thumb {
   <div class="card" id="card-chat">
     <h2>💬 对话 / 语音调试</h2>
     <div class="chat-row">
-      <input type="text" id="chat-input" placeholder="对小宝说点什么… (回车发送)" onkeydown="if(event.key==='Enter')sendChat()">
+      <input type="text" id="chat-input" placeholder="对 AITank 说点什么… (回车发送)" onkeydown="if(event.key==='Enter')sendChat()">
       <button class="btn" onclick="sendChat()">发送</button>
     </div>
     <div class="chat-reply" id="chat-reply"></div>
@@ -591,40 +739,231 @@ const COLOR_PRESETS = {
   blue:   {h_min:90,  h_max:130, s_min:80,  s_max:255, v_min:60, v_max:255},
 };
 let hsvTimer = null, colorBoxOn = false;
-function loadColorCfg() {
-  api('/api/color_cfg').then(cfg => {
-    ['h','s','v'].forEach(k => {
-      $(k+'_min').value = cfg[k+'_min'];
-      $(k+'_max').value = cfg[k+'_max'];
+
+/* ========== HSV <-> RGB 转换 ========== */
+function hsvToRgb(h, s, v) {
+  // h:0-180 (OpenCV), s:0-255, v:0-255
+  const H = h * 2;       // 转 0-360
+  const S = s / 255;
+  const V = v / 255;
+  const C = V * S;
+  const Hp = (H % 360) / 60;
+  const X = C * (1 - Math.abs(Hp % 2 - 1));
+  let r=0, g=0, b=0;
+  if (0<=Hp && Hp<1) { r=C; g=X; }
+  else if (1<=Hp && Hp<2) { r=X; g=C; }
+  else if (2<=Hp && Hp<3) { g=C; b=X; }
+  else if (3<=Hp && Hp<4) { g=X; b=C; }
+  else if (4<=Hp && Hp<5) { r=X; b=C; }
+  else if (5<=Hp && Hp<6) { r=C; b=X; }
+  const m = V - C;
+  return [Math.round((r+m)*255), Math.round((g+m)*255), Math.round((b+m)*255)];
+}
+function rgbToCss(r, g, b) { return `rgb(${r},${g},${b})`; }
+
+/* ========== 绘制 HSV 颜色空间 (H×S 画布) ========== */
+function drawHsvCanvas() {
+  const canvas = $('hsv-canvas');
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  const W = canvas.width, H = canvas.height;
+  const v = parseInt($('v_max').value) || 200;   // 用上限V值做当前V
+  const vNorm = v / 255;
+
+  const imgData = ctx.createImageData(W, H);
+  for (let x = 0; x < W; x++) {
+    const h = (x / W) * 180;        // H: 0~180
+    for (let y = 0; y < H; y++) {
+      const s = ((H - y) / H) * 255; // S: 0~255 (上饱和下不饱和)
+      const [r, g, b] = hsvToRgb(h, s, v);
+      const idx = (y * W + x) * 4;
+      imgData.data[idx] = r;
+      imgData.data[idx+1] = g;
+      imgData.data[idx+2] = b;
+      imgData.data[idx+3] = 255;
+    }
+  }
+  ctx.putImageData(imgData, 0, 0);
+
+  // 动态更新 S/V 渐变背景
+  const curH = (parseInt($('h_min').value) + parseInt($('h_max').value)) / 2;
+  const [sr, sg, sb] = hsvToRgb(curH, 255, 255);
+  $('s-bar-bg').style.background = `linear-gradient(to right, #000 0%, ${rgbToCss(sr,sg,sb)} 100%)`;
+  $('v-bar-bg').style.background = `linear-gradient(to right, #000 0%, ${rgbToCss(sr,sg,sb)} 100%)`;
+}
+
+/* ========== 渲染 HSV 可视化范围条 ========== */
+function renderHsvBar(dim) {
+  const min = parseInt($(dim+'_min').value);
+  const max = parseInt($(dim+'_max').value);
+  const bar = $(dim + '-bar-wrap');
+  if (!bar) return;
+  const range = $(dim + '-range');
+  const dot = $(dim + '-dot');
+  const totalMax = parseInt(bar.dataset.max);
+  const totalMin = parseInt(bar.dataset.min);
+  const span = totalMax - totalMin;
+
+  const leftPct = ((min - totalMin) / span) * 100;
+  const rightPct = ((max - totalMin) / span) * 100;
+  const widthPct = rightPct - leftPct;
+  const midPct = (leftPct + rightPct) / 2;
+
+  range.style.left = leftPct + '%';
+  range.style.width = widthPct + '%';
+  dot.style.left = midPct + '%';
+
+  // 刻度值
+  $(dim+'-tick-min').textContent = min;
+  $(dim+'-tick-mid').textContent = Math.round((min+max)/2);
+  $(dim+'-tick-max').textContent = max;
+}
+
+function renderAllHsv() {
+  ['h','s','v'].forEach(renderHsvBar);
+  updateCurrentColor();
+  drawHsvCanvas();
+  updatePresetHighlight();
+}
+
+/* ========== 当前色预览 ========== */
+function updateCurrentColor() {
+  const h = (parseInt($('h_min').value) + parseInt($('h_max').value)) / 2;
+  const s = (parseInt($('s_min').value) + parseInt($('s_max').value)) / 2;
+  const v = (parseInt($('v_min').value) + parseInt($('v_max').value)) / 2;
+  const [r, g, b] = hsvToRgb(h, s, v);
+  $('current-color-swatch').style.background = rgbToCss(r, g, b);
+  $('cur-h').textContent = Math.round(h);
+  $('cur-s').textContent = Math.round(s);
+  $('cur-v').textContent = Math.round(v);
+  $('cur-r').textContent = r;
+  $('cur-g').textContent = g;
+  $('cur-b').textContent = b;
+
+  // HSV 空间指示器位置
+  const canvas = $('hsv-canvas');
+  if (canvas) {
+    const ind = $('hsv-indicator');
+    const cx = (h / 180) * 100;
+    const cy = (1 - s / 255) * 100;
+    ind.style.left = cx + '%';
+    ind.style.top = cy + '%';
+  }
+}
+
+/* ========== 预设色高亮 ========== */
+function updatePresetHighlight() {
+  const curHMin = parseInt($('h_min').value);
+  const curHMax = parseInt($('h_max').value);
+  const curMid = (curHMin + curHMax) / 2;
+  const presets = {
+    red: {mid: (170+10)/2 === 90 ? 180 : (170+10+180)/2},
+    yellow: {mid: 35},
+    green: {mid: 65},
+    blue: {mid: 110}
+  };
+  let activePreset = null;
+  let minDist = 30;
+  Object.entries({red:[170,10],yellow:[25,45],green:[45,85],blue:[90,130]}).forEach(([name, [hmin,hmax]]) => {
+    let mid = (hmin + hmax) / 2;
+    if (hmin > hmax) mid = 180;  // 红色跨越0度
+    const dist = Math.abs(curMid - mid);
+    if (dist < minDist) { minDist = dist; activePreset = name; }
+  });
+  document.querySelectorAll('.swatch').forEach(s => {
+    s.classList.toggle('active', s.dataset.preset === activePreset);
+  });
+}
+
+/* ========== 点击进度条调整范围 ========== */
+let hsvDrag = null;   // {dim, mode:'min'|'max', startX, startVal}
+function setupHsvBarInteractions() {
+  document.querySelectorAll('.hsv-bar-wrap').forEach(wrap => {
+    const dim = wrap.dataset.dim;
+    const totalMin = parseInt(wrap.dataset.min);
+    const totalMax = parseInt(wrap.dataset.max);
+    const span = totalMax - totalMin;
+
+    // 点击范围条中心附近切换最小/最大
+    wrap.addEventListener('mousedown', (e) => {
+      e.preventDefault();
+      const rect = wrap.getBoundingClientRect();
+      const pct = (e.clientX - rect.left) / rect.width;
+      const clickVal = Math.round(totalMin + pct * span);
+      const curMin = parseInt($(dim+'_min').value);
+      const curMax = parseInt($(dim+'_max').value);
+      const mid = (curMin + curMax) / 2;
+      const mode = clickVal < mid ? 'min' : 'max';
+      hsvDrag = { dim, mode, startX: e.clientX, startVal: clickVal };
+      updateFromDrag(e);
     });
-    hsvLabels();
-  }).catch(() => {});
+
+    wrap.addEventListener('mousemove', (e) => {
+      if (hsvDrag && hsvDrag.dim === dim) updateFromDrag(e);
+    });
+
+    wrap.addEventListener('mouseup', () => { hsvDrag = null; hsvCommit(); });
+    wrap.addEventListener('mouseleave', () => { if (hsvDrag) { hsvDrag = null; hsvCommit(); } });
+  });
+
+  function updateFromDrag(e) {
+    if (!hsvDrag) return;
+    const wrap = $(hsvDrag.dim + '-bar-wrap');
+    const rect = wrap.getBoundingClientRect();
+    const pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+    const val = Math.round(parseInt(wrap.dataset.min) + pct * (parseInt(wrap.dataset.max) - parseInt(wrap.dataset.min)));
+    if (hsvDrag.mode === 'min') {
+      $(hsvDrag.dim+'_min').value = Math.min(val, parseInt($(hsvDrag.dim+'_max').value));
+    } else {
+      $(hsvDrag.dim+'_max').value = Math.max(val, parseInt($(hsvDrag.dim+'_min').value));
+    }
+    renderHsvBar(hsvDrag.dim);
+    updateCurrentColor();
+  }
 }
-function hsvLabels() {
-  $('h_val').textContent = `${$('h_min').value}~${$('h_max').value}`;
-  $('s_val').textContent = `${$('s_min').value}~${$('s_max').value}`;
-  $('v_val').textContent = `${$('v_min').value}~${$('v_max').value}`;
-}
-function hsvInput() {
-  hsvLabels();
-  if (hsvTimer) clearTimeout(hsvTimer);
-  hsvTimer = setTimeout(() => {
+
+let hsvBatchTimer = null;
+function hsvCommit() {
+  renderAllHsv();
+  if (hsvBatchTimer) clearTimeout(hsvBatchTimer);
+  hsvBatchTimer = setTimeout(() => {
     api('/api/color_cfg', {method:'POST', headers:{'Content-Type':'application/json'},
       body: JSON.stringify({
         h_min:+$('h_min').value, h_max:+$('h_max').value,
         s_min:+$('s_min').value, s_max:+$('s_max').value,
         v_min:+$('v_min').value, v_max:+$('v_max').value,
       })}).catch(() => {});
-  }, 250);
+  }, 300);
 }
-function colorPreset(name) {
+
+/* ========== API 接口函数 ========== */
+function loadColorCfg() {
+  api('/api/color_cfg').then(cfg => {
+    ['h','s','v'].forEach(k => {
+      $(k+'_min').value = cfg[k+'_min'];
+      $(k+'_max').value = cfg[k+'_max'];
+    });
+    renderAllHsv();
+  }).catch(() => {});
+}
+
+/* 保留旧函数名兼容 */
+function hsvLabels() { renderAllHsv(); }
+function hsvInput() { renderAllHsv(); hsvCommit(); }
+
+function colorPreset(name, btnEl) {
   const p = COLOR_PRESETS[name];
   ['h','s','v'].forEach(k => {
     $(k+'_min').value = p[k+'_min'];
     $(k+'_max').value = p[k+'_max'];
   });
-  hsvInput();
-  if (!colorBoxOn) toggleColorBox();   // 选了预设色就顺手开画框
+  renderAllHsv();
+  hsvCommit();
+  if (btnEl) {
+    document.querySelectorAll('.swatch').forEach(s => s.classList.remove('active'));
+    btnEl.classList.add('active');
+  }
+  if (!colorBoxOn) toggleColorBox();
 }
 function toggleColorBox() {
   api('/api/detect', {method:'POST', headers:{'Content-Type':'application/json'},
@@ -633,9 +972,12 @@ function toggleColorBox() {
       const t = (d.detectors||[]).find(x => x.name === 'color');
       colorBoxOn = t ? t.enabled : false;
       $('btn-colorbox').classList.toggle('active', colorBoxOn);
-      loadDetectors();   // P3 chips 里的"颜色"同步
+      loadDetectors();
     }).catch(() => {});
 }
+
+/* 初始化 */
+setupHsvBarInteractions();
 
 /* ---------- P2 PID 追踪 ---------- */
 let pidRunning = false, pidTgt = 'face', pidTimer = null;
@@ -697,14 +1039,16 @@ function loadDetectors() {
   api('/api/detect').then(d => {
     $('detect-chips').innerHTML = (d.detectors || []).map(t =>
       `<button class="detect-chip ${t.enabled ? 'active' : ''}" ` +
-      `onclick="toggleDetect('${t.name}')">` +
+      `onclick="toggleDetect('${t.name}', this)">` +
       `<span class="dot" style="background:${t.color};color:${t.color}"></span>${t.label}</button>`
     ).join('');
   }).catch(() => {});
 }
-function toggleDetect(name) {
+function toggleDetect(name, btn) {
+  // 显式携带目标状态, 避免与服务器状态不同步时点反
+  const enable = !(btn && btn.classList.contains('active'));
   api('/api/detect', {method: 'POST', headers: {'Content-Type': 'application/json'},
-                      body: JSON.stringify({name})})
+                      body: JSON.stringify({name, enabled: enable})})
     .then(loadDetectors).catch(() => {});
 }
 
