@@ -1,0 +1,892 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>小宝中控面板</title>
+<style>
+:root {
+  --bg: #0b0f14;
+  --card: rgba(255,255,255,.045);
+  --card-border: rgba(255,255,255,.09);
+  --text: #e6edf3;
+  --muted: #8b98a9;
+  --accent: #34d399;
+  --accent-dim: rgba(52,211,153,.15);
+  --danger: #f87171;
+  --warn: #fbbf24;
+  --mono: "JetBrains Mono", ui-monospace, Consolas, monospace;
+  --r: 16px;
+}
+* { margin:0; padding:0; box-sizing:border-box; }
+body {
+  background: var(--bg);
+  background-image: radial-gradient(1000px 500px at 80% -10%, rgba(52,211,153,.07), transparent),
+                    radial-gradient(800px 400px at 10% 110%, rgba(96,165,250,.06));
+  color: var(--text);
+  font: 14px/1.5 "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  min-height: 100vh;
+  padding: 20px;
+}
+button { font-family: inherit; cursor: pointer; }
+input, select { font-family: inherit; }
+
+.grid { display: grid; grid-template-columns: repeat(12, 1fr); gap: 16px; max-width: 1440px; margin: 0 auto; }
+.card {
+  background: var(--card);
+  border: 1px solid var(--card-border);
+  border-radius: var(--r);
+  padding: 16px;
+  backdrop-filter: blur(6px);
+}
+.card h2 { font-size: 15px; font-weight: 600; margin-bottom: 12px; display:flex; align-items:center; gap:8px; }
+.card h2 .tag { font-size: 11px; color: var(--muted); font-weight: 400; }
+
+/* ---------- 头部 ---------- */
+header {
+  grid-column: 1/-1;
+  display: flex; align-items: center; gap: 14px;
+  padding: 14px 20px;
+}
+.header-title { font-size: 20px; font-weight: 700; letter-spacing: .5px; }
+.header-title .paw { color: var(--accent); }
+.conn { display:flex; align-items:center; gap:6px; font-size:12px; color:var(--muted); }
+.dot { width:9px; height:9px; border-radius:50%; background: var(--danger); transition: background .3s; }
+.dot.on { background: var(--accent); animation: pulse 2s infinite; }
+@keyframes pulse { 0%,100%{box-shadow:0 0 0 0 rgba(52,211,153,.5)} 50%{box-shadow:0 0 0 6px rgba(52,211,153,0)} }
+#estop {
+  margin-left: auto;
+  background: rgba(248,113,113,.12);
+  color: var(--danger);
+  border: 1px solid rgba(248,113,113,.5);
+  border-radius: 999px;
+  padding: 8px 22px;
+  font-size: 14px; font-weight: 700; letter-spacing: 2px;
+  transition: .15s;
+}
+#estop:hover { background: rgba(248,113,113,.25); }
+#estop:active { transform: scale(.96); }
+
+/* ---------- 视频 ---------- */
+#card-video { grid-column: span 5; }
+.video-wrap {
+  position: relative;
+  border-radius: 12px;
+  overflow: hidden;
+  background: #000;
+  aspect-ratio: 4/3;
+}
+.video-wrap img { width:100%; height:100%; object-fit: cover; display:block; }
+.video-wrap canvas { position:absolute; inset:0; width:100%; height:100%; pointer-events:none; }
+.video-off {
+  position:absolute; inset:0; display:flex; flex-direction:column;
+  align-items:center; justify-content:center; gap:8px;
+  color: var(--muted); font-size: 13px;
+  background: repeating-linear-gradient(45deg, #0d1218, #0d1218 10px, #0f141b 10px, #0f141b 20px);
+}
+.video-btns { display:flex; gap:8px; margin-top:12px; flex-wrap:wrap; }
+.btn {
+  background: var(--accent-dim);
+  color: var(--accent);
+  border: 1px solid rgba(52,211,153,.35);
+  border-radius: 10px;
+  padding: 7px 14px;
+  font-size: 13px; font-weight: 600;
+  transition: .15s;
+}
+.btn:hover { background: rgba(52,211,153,.28); }
+.btn.ghost { background: transparent; color: var(--muted); border-color: var(--card-border); }
+.btn.ghost:hover { color: var(--text); border-color: var(--muted); }
+.btn.ghost.active { color: var(--accent); border-color: var(--accent); background: var(--accent-dim); }
+#photo-thumb { width: 56px; height: 42px; object-fit: cover; border-radius: 8px; border:1px solid var(--card-border); display:none; }
+
+/* ---------- 运动 ---------- */
+#card-move { grid-column: span 4; }
+.move-grid { display:grid; grid-template-columns: 1fr auto; gap: 16px; }
+.dir-pad { display:grid; grid-template-columns: repeat(3, 52px); grid-template-rows: repeat(3, 52px); gap: 6px; justify-content:center; }
+.dir-btn {
+  background: var(--card);
+  border: 1px solid var(--card-border);
+  border-radius: 12px;
+  color: var(--text);
+  font-size: 18px;
+  display:flex; align-items:center; justify-content:center;
+  transition: .12s;
+  user-select: none;
+}
+.dir-btn:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-dim); }
+.dir-btn:active { transform: scale(.92); background: rgba(52,211,153,.3); }
+.dir-btn.stop { color: var(--danger); border-color: rgba(248,113,113,.4); }
+.dir-btn.stop:hover { background: rgba(248,113,113,.15); border-color: var(--danger); }
+.ptz-pad { display:grid; grid-template-columns: repeat(3, 40px); grid-template-rows: repeat(3, 40px); gap: 5px; justify-content:center; align-content:center; }
+.ptz-pad .dir-btn { border-radius: 10px; font-size: 14px; }
+.pad-label { text-align:center; font-size:11px; color:var(--muted); margin-top:6px; }
+.slider-row { display:flex; align-items:center; gap:10px; margin-top:14px; font-size:12px; color:var(--muted); }
+input[type=range] {
+  flex:1; -webkit-appearance:none; height:5px; border-radius:99px;
+  background: linear-gradient(to right, var(--accent) var(--fill,50%), rgba(255,255,255,.12) var(--fill,50%));
+  outline:none;
+}
+input[type=range]::-webkit-slider-thumb {
+  -webkit-appearance:none; width:16px; height:16px; border-radius:50%;
+  background:#fff; border:3px solid var(--accent); cursor:pointer;
+  box-shadow: 0 2px 8px rgba(0,0,0,.5);
+}
+.num-input {
+  width: 58px; background: rgba(255,255,255,.06); border:1px solid var(--card-border);
+  color: var(--text); border-radius: 8px; padding: 5px 8px; font-size: 13px; text-align:center;
+  font-family: var(--mono);
+}
+.num-input:focus { outline:none; border-color: var(--accent); }
+.angle-pills { display:flex; gap:8px; margin-top:10px; justify-content:center; }
+.pill {
+  font-family: var(--mono); font-size: 12px;
+  background: rgba(255,255,255,.05); border:1px solid var(--card-border);
+  border-radius: 999px; padding: 3px 12px; color: var(--muted);
+}
+.pill b { color: var(--accent); font-weight:600; }
+
+/* ---------- 状态 ---------- */
+#card-status { grid-column: span 3; }
+/* ---------- P1 颜色识别 ---------- */
+#card-color { grid-column: span 4; }
+.color-presets { display:flex; align-items:center; gap:8px; margin-bottom:12px; }
+.swatch { width:28px; height:28px; border-radius:8px; border:2px solid transparent; cursor:pointer; transition:.15s; }
+.swatch:hover { border-color:#fff; transform:scale(1.1); }
+.hsv-row { display:flex; align-items:center; gap:8px; margin-bottom:8px; }
+.hsv-row input[type=range] { flex:1; min-width:0; accent-color: var(--accent); }
+.hsv-lbl { width:16px; color:var(--muted); font-size:12px; flex-shrink:0; font-family:var(--mono); }
+.hsv-val { width:74px; text-align:right; font-family:var(--mono); font-size:11px; color:var(--accent); flex-shrink:0; }
+
+/* ---------- P2 PID 追踪 ---------- */
+#card-pid { grid-column: span 4; }
+.pid-targets { display:flex; gap:8px; margin-bottom:12px; }
+.pid-targets .btn { flex:1; }
+.pid-status { display:flex; flex-wrap:wrap; gap:6px; }
+.btn:disabled { opacity:.4; cursor:not-allowed; }
+
+/* ---------- P3 智能识别 ---------- */
+#card-detect { grid-column: span 4; }
+/* 智能识别 (在运动控制卡内下方) */
+.detect-head { font-size:14px; font-weight:600; display:flex; align-items:center; gap:8px; margin-bottom:10px; }
+.detect-hint { font-size:11px; color:var(--muted); font-weight:400; }
+.detect-grid { display:flex; flex-wrap:wrap; gap:8px; }
+.detect-chip {
+  display:inline-flex; align-items:center; gap:7px;
+  background: var(--card); border:1px solid var(--card-border);
+  color: var(--text); border-radius:99px; padding:6px 13px;
+  font-size:12px; cursor:pointer; transition:.15s; user-select:none;
+}
+.detect-chip .dot { width:9px; height:9px; border-radius:99px; flex-shrink:0; opacity:.45; transition:.15s; }
+.detect-chip:hover { border-color: var(--accent); }
+.detect-chip.active { border-color: var(--accent); background: rgba(74,222,128,.10); }
+.detect-chip.active .dot { opacity:1; box-shadow: 0 0 6px currentColor; }
+.stat-row { display:flex; align-items:center; gap:8px; margin-bottom:10px; font-size:12px; }
+.stat-row .lbl { width: 52px; color: var(--muted); flex-shrink:0; }
+.stat-row .val { font-family: var(--mono); font-size: 12px; margin-left:auto; }
+.bar-track { flex:1; height:6px; background: rgba(255,255,255,.08); border-radius:99px; overflow:hidden; }
+.bar-fill { height:100%; background: var(--accent); border-radius:99px; transition: width .6s ease; }
+.bar-fill.mid { background: #60a5fa; }
+.bar-fill.warn { background: var(--warn); }
+.divider { border-top:1px solid var(--card-border); margin: 12px 0; }
+.mood-emo { font-size: 24px; margin-right: 4px; }
+.cfg-badges { display:flex; flex-wrap:wrap; gap:6px; }
+.cfg-badge { font-size:11px; font-family:var(--mono); background:rgba(255,255,255,.05); border:1px solid var(--card-border); padding:2px 9px; border-radius:99px; color:var(--muted); }
+
+/* ---------- 技能 ---------- */
+#card-skills { grid-column: 1/-1; }
+.skill-list { display:flex; flex-direction:column; gap:8px; }
+.skill-row {
+  display:flex; align-items:center; gap:10px; flex-wrap:wrap;
+  background: rgba(255,255,255,.03);
+  border:1px solid var(--card-border);
+  border-radius: 12px; padding: 10px 14px;
+}
+.skill-name { font-family:var(--mono); font-weight:600; color:var(--accent); font-size:13px; min-width:90px; }
+.skill-desc { font-size:12px; color:var(--muted); flex:1; min-width:150px; }
+.skill-input, .skill-select {
+  background: rgba(255,255,255,.06); border:1px solid var(--card-border);
+  color: var(--text); border-radius: 8px; padding: 5px 9px; font-size:12px;
+  font-family: var(--mono); max-width: 130px;
+}
+.skill-input:focus, .skill-select:focus { outline:none; border-color: var(--accent); }
+/* Windows Chrome 下拉弹窗用系统白底, 必须显式给 option 深色背景 */
+.skill-select option { background: #141b24; color: #e6edf3; }
+.skill-run {
+  background: var(--accent-dim); color: var(--accent);
+  border:1px solid rgba(52,211,153,.35); border-radius: 8px;
+  padding: 5px 16px; font-size:12px; font-weight:600; transition:.15s;
+}
+.skill-run:hover { background: rgba(52,211,153,.28); }
+.skill-run:disabled { opacity:.4; cursor:wait; }
+.skill-result { font-size:12px; font-family:var(--mono); width:100%; padding-left: 100px; }
+.skill-result.ok { color: var(--accent); }
+.skill-result.err { color: var(--danger); }
+
+/* ---------- 对话 & 日志 ---------- */
+#card-chat { grid-column: span 7; }
+#card-logs { grid-column: span 5; }
+.chat-row { display:flex; gap:8px; }
+.chat-row input[type=text] {
+  flex:1; background: rgba(255,255,255,.06); border:1px solid var(--card-border);
+  border-radius: 10px; padding: 9px 14px; color: var(--text); font-size:14px;
+}
+.chat-row input[type=text]:focus { outline:none; border-color: var(--accent); }
+.chat-reply {
+  margin-top:12px; background: var(--accent-dim);
+  border:1px solid rgba(52,211,153,.25);
+  border-radius: 12px; padding: 10px 14px; font-size:14px;
+  display:none;
+}
+.chat-meta { display:flex; gap:6px; margin-top:8px; flex-wrap:wrap; }
+.chat-meta .pill { font-size:11px; }
+.chat-tools { display:flex; gap:8px; margin-top:10px; flex-wrap:wrap; }
+.mini-label { font-size:11px; color: var(--muted); margin-bottom:4px; }
+.log-console {
+  background: #06090d;
+  border:1px solid var(--card-border);
+  border-radius: 10px;
+  height: 240px; overflow-y:auto;
+  font-family: var(--mono); font-size: 12px;
+  padding: 10px 12px;
+}
+.log-console::-webkit-scrollbar { width:6px; }
+.log-console::-webkit-scrollbar-thumb { background: rgba(255,255,255,.15); border-radius:99px; }
+.log-line { padding: 2px 0; color: #9fb0c3; display:flex; gap:8px; }
+.log-line .lt { color:#5b6b7f; flex-shrink:0; }
+.log-kind { flex-shrink:0; width:58px; font-weight:600; }
+.k-move{color:#60a5fa} .k-ptz{color:#c084fc} .k-skill{color:var(--accent)} .k-chat{color:#fbbf24}
+.k-photo{color:#f472b6} .k-emotion{color:#fb923c} .k-sys{color:var(--danger)} .k-tts{color:#34d399} .k-asr{color:#a3e635}
+
+/* ---------- 表情 ---------- */
+.emo-grid { display:flex; flex-wrap:wrap; gap:6px; }
+.emo-btn {
+  background: rgba(255,255,255,.04); border:1px solid var(--card-border);
+  border-radius: 10px; padding: 6px 12px; font-size: 13px; color: var(--text);
+  transition: .12s;
+}
+.emo-btn:hover { border-color: var(--accent); background: var(--accent-dim); }
+.emo-btn:active { transform: scale(.94); }
+
+/* ---------- Toast ---------- */
+#toasts { position: fixed; top: 20px; right: 20px; display:flex; flex-direction:column; gap:8px; z-index:99; }
+.toast {
+  background: #141b24; border:1px solid var(--card-border);
+  border-left: 3px solid var(--accent);
+  border-radius: 10px; padding: 10px 16px; font-size:13px;
+  box-shadow: 0 8px 24px rgba(0,0,0,.5);
+  animation: slideIn .25s ease;
+  max-width: 320px;
+}
+.toast.err { border-left-color: var(--danger); }
+@keyframes slideIn { from{transform:translateX(30px);opacity:0} to{transform:none;opacity:1} }
+.toast { animation: slideIn .25s ease; }
+
+@media (max-width: 1100px) {
+  #card-video, #card-move { grid-column: span 6; }
+  #card-status { grid-column: 1/-1; }
+  #card-color, #card-pid, #card-detect { grid-column: span 6; }
+  #card-chat, #card-logs { grid-column: 1/-1; }
+}
+@media (max-width: 720px) {
+  #card-video, #card-move { grid-column: 1/-1; }
+  #card-color, #card-pid, #card-detect { grid-column: 1/-1; }
+  .move-grid { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body>
+
+<div class="grid">
+
+  <!-- ===== 头部 ===== -->
+  <header class="card">
+    <div class="header-title"><span class="paw">🐾</span> 小宝 · 中控面板</div>
+    <div class="conn"><span class="dot" id="conn-dot"></span><span id="conn-text">连接中…</span></div>
+    <button id="estop" onclick="estop()">急停</button>
+  </header>
+
+  <!-- ===== 视频 ===== -->
+  <div class="card" id="card-video">
+    <h2>📷 实时视频 <span class="tag">MJPEG · 15fps</span></h2>
+    <div class="video-wrap">
+      <img id="video-img" src="/api/video_feed" alt="" onerror="videoOff(true)" onload="videoOff(false)">
+      <canvas id="face-canvas"></canvas>
+      <div class="video-off" id="video-off" style="display:none"><span style="font-size:28px">📷</span><span>摄像头未连接</span></div>
+    </div>
+    <div class="video-btns">
+      <button class="btn" id="btn-cam" onclick="toggleCamera()">关闭摄像头</button>
+      <button class="btn ghost" onclick="takePhoto()">拍照</button>
+      <img id="photo-thumb" alt="">
+    </div>
+  </div>
+
+  <!-- ===== 运动控制 ===== -->
+  <div class="card" id="card-move">
+    <h2>🎮 运动控制 <span class="tag">开环 · 定时自动停</span></h2>
+    <div class="move-grid">
+      <div>
+        <div class="dir-pad">
+          <button class="dir-btn" onclick="move('forwardLeft')">↖</button>
+          <button class="dir-btn" onclick="move('forward')">↑</button>
+          <button class="dir-btn" onclick="move('forwardRight')">↗</button>
+          <button class="dir-btn" onclick="move('leftSlide')">←</button>
+          <button class="dir-btn stop" onclick="move('stop')">■</button>
+          <button class="dir-btn" onclick="move('rightSlide')">→</button>
+          <button class="dir-btn" onclick="move('turnLeft')">↺</button>
+          <button class="dir-btn" onclick="move('backward')">↓</button>
+          <button class="dir-btn" onclick="move('turnRight')">↻</button>
+        </div>
+        <div class="pad-label">底盘</div>
+      </div>
+      <div>
+        <div class="ptz-pad">
+          <span></span>
+          <button class="dir-btn" onclick="ptz('up')">↑</button>
+          <span></span>
+          <button class="dir-btn" onclick="ptz('left')">←</button>
+          <button class="dir-btn" onclick="ptz('center')" style="color:var(--accent)">⊙</button>
+          <button class="dir-btn" onclick="ptz('right')">→</button>
+          <span></span>
+          <button class="dir-btn" onclick="ptz('down')">↓</button>
+          <span></span>
+        </div>
+        <div class="pad-label">云台 <span style="font-family:var(--mono)">Δ<input class="num-input" id="ptz-delta" type="number" value="10" min="1" max="45" style="width:46px"></span></div>
+      </div>
+    </div>
+    <div class="slider-row">
+      <span>速度 <b id="speed-val" style="color:var(--accent);font-family:var(--mono)">150</b></span>
+      <input type="range" id="speed-slider" min="30" max="255" value="150" oninput="speedInput(this)" onchange="speedSet(this)">
+      <span>时长</span>
+      <input class="num-input" id="move-duration" type="number" value="1" min="0.2" max="10" step="0.2">
+      <span>s</span>
+    </div>
+    <div class="angle-pills">
+      <span class="pill">云台H <b id="ptz-h">--</b>°</span>
+      <span class="pill">云台V <b id="ptz-v">--</b>°</span>
+      <span class="pill">指令 <b id="base-cmd">--</b></span>
+    </div>
+
+    <!-- ===== 路径规划 (预留: 走8字/画圆圈等运动学轨迹) ===== -->
+    <div class="divider"></div>
+    <div class="detect-head">🛣️ 路径规划 <span class="detect-hint">预留 · 运动学轨迹</span></div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <button class="btn ghost" disabled title="待实现">走8字</button>
+      <button class="btn ghost" disabled title="待实现">画圆圈</button>
+      <button class="btn ghost" disabled title="待实现">自定义</button>
+    </div>
+  </div>
+
+  <!-- ===== 状态 ===== -->
+  <div class="card" id="card-status">
+    <h2>📊 状态 <span class="tag" id="uptime">--</span></h2>
+    <div class="stat-row"><span class="mood-emo" id="mood-emo">😐</span><span class="lbl">心情</span><span class="val" id="mood-name">--</span></div>
+    <div class="stat-row"><span class="lbl">愉悦 V</span><div class="bar-track"><div class="bar-fill" id="bar-v" style="width:50%"></div></div><span class="val" id="val-v">--</span></div>
+    <div class="stat-row"><span class="lbl">唤醒 A</span><div class="bar-track"><div class="bar-fill mid" id="bar-a" style="width:50%"></div></div><span class="val" id="val-a">--</span></div>
+    <div class="stat-row"><span class="lbl">强度 I</span><div class="bar-track"><div class="bar-fill mid" id="bar-i" style="width:50%"></div></div><span class="val" id="val-i">--</span></div>
+    <div class="divider"></div>
+    <div class="stat-row"><span class="lbl">CPU</span><div class="bar-track"><div class="bar-fill warn" id="bar-cpu" style="width:0%"></div></div><span class="val" id="val-cpu">--</span></div>
+    <div class="stat-row"><span class="lbl">内存</span><div class="bar-track"><div class="bar-fill warn" id="bar-mem" style="width:0%"></div></div><span class="val" id="val-mem">--</span></div>
+    <div class="stat-row"><span class="lbl">温度</span><span class="val" id="val-temp">--</span></div>
+    <div class="divider"></div>
+    <div class="cfg-badges" id="cfg-badges"></div>
+    <div class="divider"></div>
+    <div class="mini-label">表情测试</div>
+    <div class="emo-grid" id="emo-grid"></div>
+  </div>
+
+  <!-- ===== P1 颜色识别 ===== -->
+  <div class="card" id="card-color">
+    <h2>🎨 颜色识别 <span class="tag">HSV 可调 · PID 颜色追踪复用</span></h2>
+    <div class="color-presets">
+      <button class="swatch" style="background:#f44336" title="红" onclick="colorPreset('red')"></button>
+      <button class="swatch" style="background:#ffeb3b" title="黄" onclick="colorPreset('yellow')"></button>
+      <button class="swatch" style="background:#4caf50" title="绿" onclick="colorPreset('green')"></button>
+      <button class="swatch" style="background:#2196f3" title="蓝" onclick="colorPreset('blue')"></button>
+      <button class="btn ghost" id="btn-colorbox" style="margin-left:auto" onclick="toggleColorBox()">画框</button>
+    </div>
+    <div class="hsv-row"><span class="hsv-lbl">H</span>
+      <input type="range" id="h_min" min="0" max="180" oninput="hsvInput()">
+      <input type="range" id="h_max" min="0" max="180" oninput="hsvInput()">
+      <b class="hsv-val" id="h_val">--</b></div>
+    <div class="hsv-row"><span class="hsv-lbl">S</span>
+      <input type="range" id="s_min" min="0" max="255" oninput="hsvInput()">
+      <input type="range" id="s_max" min="0" max="255" oninput="hsvInput()">
+      <b class="hsv-val" id="s_val">--</b></div>
+    <div class="hsv-row"><span class="hsv-lbl">V</span>
+      <input type="range" id="v_min" min="0" max="255" oninput="hsvInput()">
+      <input type="range" id="v_max" min="0" max="255" oninput="hsvInput()">
+      <b class="hsv-val" id="v_val">--</b></div>
+  </div>
+
+  <!-- ===== P2 PID 追踪 ===== -->
+  <div class="card" id="card-pid">
+    <h2>🎯 PID 追踪 <span class="tag" id="pid-state">停止中</span></h2>
+    <div class="pid-targets">
+      <button class="btn ghost active" id="pt-face" onclick="pidTarget('face')">😊 人脸</button>
+      <button class="btn ghost" id="pt-color" onclick="pidTarget('color')">🟨 颜色积木</button>
+      <button class="btn ghost" id="pt-tennis" onclick="pidTarget('tennis')">🎾 网球</button>
+    </div>
+    <div class="hsv-row"><span class="hsv-lbl">Kp</span>
+      <input type="range" id="pid-kp" min="0" max="0.2" step="0.005" oninput="pidInput()">
+      <b class="hsv-val" id="pid-kp-val">--</b></div>
+    <div class="hsv-row"><span class="hsv-lbl">Ki</span>
+      <input type="range" id="pid-ki" min="0" max="0.05" step="0.001" oninput="pidInput()">
+      <b class="hsv-val" id="pid-ki-val">--</b></div>
+    <div class="hsv-row"><span class="hsv-lbl">Kd</span>
+      <input type="range" id="pid-kd" min="0" max="0.1" step="0.002" oninput="pidInput()">
+      <b class="hsv-val" id="pid-kd-val">--</b></div>
+    <button class="btn" id="btn-pid" style="width:100%;margin:10px 0" onclick="pidToggle()">开始追踪</button>
+    <div class="pid-status">
+      <span class="pill">目标 <b id="pid-seen">--</b></span>
+      <span class="pill">误差 <b id="pid-err">--</b></span>
+      <span class="pill">输出 <b id="pid-out">--</b></span>
+    </div>
+  </div>
+
+  <!-- ===== P3 智能识别 ===== -->
+  <div class="card" id="card-detect">
+    <h2>👁️ 智能识别 <span class="tag">复选 · 点亮即在视频里画框</span></h2>
+    <div class="detect-grid" id="detect-chips"><div style="color:var(--muted);font-size:12px">加载中…</div></div>
+  </div>
+
+  <!-- ===== 对话 / 语音 ===== -->
+  <div class="card" id="card-chat">
+    <h2>💬 对话 / 语音调试</h2>
+    <div class="chat-row">
+      <input type="text" id="chat-input" placeholder="对小宝说点什么… (回车发送)" onkeydown="if(event.key==='Enter')sendChat()">
+      <button class="btn" onclick="sendChat()">发送</button>
+    </div>
+    <div class="chat-reply" id="chat-reply"></div>
+    <div class="chat-meta" id="chat-meta"></div>
+    <div class="divider"></div>
+    <div class="chat-tools">
+      <div style="flex:1;min-width:200px">
+        <div class="mini-label">TTS 试听</div>
+        <div class="chat-row">
+          <input type="text" id="tts-input" placeholder="要朗读的文本">
+          <button class="btn ghost" onclick="ttsSpeak()">朗读</button>
+        </div>
+      </div>
+      <div style="flex:1;min-width:200px">
+        <div class="mini-label">ASR 单句识别 (在小车旁说话)</div>
+        <div class="chat-row">
+          <button class="btn ghost" id="btn-asr" onclick="asrOnce()">开始识别</button>
+          <span class="pill" style="align-self:center" id="asr-result">--</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== 日志 ===== -->
+  <div class="card" id="card-logs">
+    <h2>📜 日志 <span class="tag">最近 50 条</span><button class="btn ghost" style="margin-left:auto;padding:3px 12px;font-size:11px" onclick="clearLogs()">清空</button></h2>
+    <div class="log-console" id="log-console"></div>
+  </div>
+
+  <!-- ===== 技能调试 ===== -->
+  <div class="card" id="card-skills">
+    <h2>🛠️ 技能调试 <span class="tag">按钮由 SkillManager 自动生成 · 点一下跑一个功能</span></h2>
+    <div class="skill-list" id="skill-list"><div style="color:var(--muted);font-size:13px">加载中…</div></div>
+  </div>
+
+</div>
+
+<div id="toasts"></div>
+
+<script>
+const $ = id => document.getElementById(id);
+const api = (url, opts) => fetch(url, opts).then(r => r.json());
+
+/* ---------- Toast ---------- */
+function toast(msg, err=false) {
+  const t = document.createElement('div');
+  t.className = 'toast' + (err ? ' err' : '');
+  t.textContent = msg;
+  $('toasts').appendChild(t);
+  setTimeout(() => t.remove(), 3200);
+}
+
+/* ---------- 连接状态 ---------- */
+let lastLogId = 0, pollFail = 0;
+
+/* ---------- 运动 ---------- */
+function move(direction) {
+  const duration = parseFloat($('move-duration').value) || 1;
+  api('/api/base/move', {method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({direction, duration})})
+    .then(() => direction !== 'stop' && toast(`底盘 ${direction} ${duration}s`))
+    .catch(() => toast('运动指令失败', true));
+}
+function speedInput(el) {
+  $('speed-val').textContent = el.value;
+  el.style.setProperty('--fill', (el.value - el.min) / (el.max - el.min) * 100 + '%');
+}
+function speedSet(el) {
+  api('/api/base/speed', {method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({speed: parseInt(el.value)})})
+    .then(d => toast(`速度 → ${d.speed}`));
+}
+function ptz(direction) {
+  const delta = parseFloat($('ptz-delta').value) || 10;
+  api('/api/ptz', {method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({direction, delta})})
+    .then(d => { if (d.h !== undefined) { $('ptz-h').textContent = d.h; $('ptz-v').textContent = d.v; } });
+}
+function estop() {
+  api('/api/estop', {method:'POST'}).then(() => toast('已急停', true));
+}
+
+/* ---------- 视频流管理 ---------- */
+const TRANSPARENT_PX = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
+let camOn = true;          // 期望视频处于播放状态
+let streamRetry = null;
+
+function setCamUI(on) {
+  camOn = on;
+  const img = $('video-img'), off = $('video-off'), btn = $('btn-cam');
+  btn.textContent = on ? '关闭摄像头' : '打开摄像头';
+  if (on) {
+    off.style.display = 'none';
+    img.src = '/api/video_feed?t=' + Date.now();
+  } else {
+    if (streamRetry) { clearTimeout(streamRetry); streamRetry = null; }
+    img.src = TRANSPARENT_PX;   // 断开 MJPEG 长连接
+    off.querySelector('span:last-child').textContent = '摄像头已关闭';
+    off.style.display = 'flex';
+  }
+}
+function toggleCamera() {
+  api('/api/camera/' + (camOn ? 'close' : 'open'), {method:'POST'})
+    .then(d => setCamUI(!!d.open))
+    .catch(() => toast('摄像头操作失败', true));
+}
+function videoOff(off) {   // img onerror / onload
+  if (!camOn) return;
+  $('video-off').style.display = off ? 'flex' : 'none';
+  if (off) {  // 断流自动重连
+    $('video-off').querySelector('span:last-child').textContent = '视频流中断, 重连中…';
+    if (streamRetry) clearTimeout(streamRetry);
+    streamRetry = setTimeout(() => {
+      if (camOn) $('video-img').src = '/api/video_feed?t=' + Date.now();
+    }, 3000);
+  }
+}
+function takePhoto() {
+  api('/api/photo').then(d => {
+    if (d.path) {
+      toast('已拍照 ✓');
+      const th = $('photo-thumb');
+      th.src = '/api/photo/latest?t=' + Date.now();
+      th.style.display = 'block';
+    } else toast('拍照失败: ' + (d.note || ''), true);
+  });
+}
+
+/* ---------- P1 颜色识别 ---------- */
+const COLOR_PRESETS = {
+  red:    {h_min:170, h_max:10,  s_min:120, s_max:255, v_min:80, v_max:255},
+  yellow: {h_min:25,  h_max:45,  s_min:90,  s_max:255, v_min:90, v_max:255},
+  green:  {h_min:45,  h_max:85,  s_min:80,  s_max:255, v_min:70, v_max:255},
+  blue:   {h_min:90,  h_max:130, s_min:80,  s_max:255, v_min:60, v_max:255},
+};
+let hsvTimer = null, colorBoxOn = false;
+function loadColorCfg() {
+  api('/api/color_cfg').then(cfg => {
+    ['h','s','v'].forEach(k => {
+      $(k+'_min').value = cfg[k+'_min'];
+      $(k+'_max').value = cfg[k+'_max'];
+    });
+    hsvLabels();
+  }).catch(() => {});
+}
+function hsvLabels() {
+  $('h_val').textContent = `${$('h_min').value}~${$('h_max').value}`;
+  $('s_val').textContent = `${$('s_min').value}~${$('s_max').value}`;
+  $('v_val').textContent = `${$('v_min').value}~${$('v_max').value}`;
+}
+function hsvInput() {
+  hsvLabels();
+  if (hsvTimer) clearTimeout(hsvTimer);
+  hsvTimer = setTimeout(() => {
+    api('/api/color_cfg', {method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({
+        h_min:+$('h_min').value, h_max:+$('h_max').value,
+        s_min:+$('s_min').value, s_max:+$('s_max').value,
+        v_min:+$('v_min').value, v_max:+$('v_max').value,
+      })}).catch(() => {});
+  }, 250);
+}
+function colorPreset(name) {
+  const p = COLOR_PRESETS[name];
+  ['h','s','v'].forEach(k => {
+    $(k+'_min').value = p[k+'_min'];
+    $(k+'_max').value = p[k+'_max'];
+  });
+  hsvInput();
+  if (!colorBoxOn) toggleColorBox();   // 选了预设色就顺手开画框
+}
+function toggleColorBox() {
+  api('/api/detect', {method:'POST', headers:{'Content-Type':'application/json'},
+                      body: JSON.stringify({name:'color'})})
+    .then(d => {
+      const t = (d.detectors||[]).find(x => x.name === 'color');
+      colorBoxOn = t ? t.enabled : false;
+      $('btn-colorbox').classList.toggle('active', colorBoxOn);
+      loadDetectors();   // P3 chips 里的"颜色"同步
+    }).catch(() => {});
+}
+
+/* ---------- P2 PID 追踪 ---------- */
+let pidRunning = false, pidTgt = 'face', pidTimer = null;
+function pidTarget(t) {
+  pidTgt = t;
+  $('pt-face').classList.toggle('active', t === 'face');
+  $('pt-color').classList.toggle('active', t === 'color');
+  $('pt-tennis').classList.toggle('active', t === 'tennis');
+  pidPushParams();
+}
+function pidVals() {
+  return {kp:+$('pid-kp').value, ki:+$('pid-ki').value, kd:+$('pid-kd').value};
+}
+function pidLabels() {
+  $('pid-kp-val').textContent = (+$('pid-kp').value).toFixed(3);
+  $('pid-ki-val').textContent = (+$('pid-ki').value).toFixed(3);
+  $('pid-kd-val').textContent = (+$('pid-kd').value).toFixed(3);
+}
+function pidInput() {
+  pidLabels();
+  if (pidTimer) clearTimeout(pidTimer);
+  pidTimer = setTimeout(pidPushParams, 250);
+}
+function pidPushParams() {   // 运行中也可实时调参
+  api('/api/track', {method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({action:'params', ...pidVals(), target:pidTgt})})
+    .then(pidSync).catch(() => {});
+}
+function pidToggle() {
+  const body = pidRunning ? {action:'stop'}
+                          : {action:'start', ...pidVals(), target:pidTgt};
+  api('/api/track', {method:'POST', headers:{'Content-Type':'application/json'},
+                     body: JSON.stringify(body)})
+    .then(pidSync)
+    .catch(() => toast('追踪器不可用', true));
+}
+function pidSync(d) {
+  if (!d || d.running === undefined) return;
+  pidRunning = d.running;
+  pidTgt = d.target;
+  $('btn-pid').textContent = pidRunning ? '停止追踪' : '开始追踪';
+  $('btn-pid').classList.toggle('danger', pidRunning);
+  const TGT_NAME = {face:'人脸', color:'颜色积木', tennis:'网球'};
+  $('pid-state').textContent = pidRunning ? `追踪中 · ${TGT_NAME[pidTgt] || pidTgt}` : '停止中';
+  $('pid-seen').textContent = pidRunning ? (d.seen ? '🟢 锁定' : '⚪ 丢失') : '--';
+  $('pid-err').textContent = pidRunning ? `${d.err_x}, ${d.err_y}` : '--';
+  $('pid-out').textContent = pidRunning ? `${d.out_x}°, ${d.out_y}°` : '--';
+  // 后端参数回填 (仅未在拖动时覆盖)
+  if (!pidTimer) {
+    $('pid-kp').value = d.kp; $('pid-ki').value = d.ki; $('pid-kd').value = d.kd;
+    pidLabels();
+  }
+  $('pt-face').classList.toggle('active', pidTgt === 'face');
+  $('pt-color').classList.toggle('active', pidTgt === 'color');
+  $('pt-tennis').classList.toggle('active', pidTgt === 'tennis');
+}
+setInterval(() => { api('/api/track').then(pidSync).catch(() => {}); }, 800);
+function loadDetectors() {
+  api('/api/detect').then(d => {
+    $('detect-chips').innerHTML = (d.detectors || []).map(t =>
+      `<button class="detect-chip ${t.enabled ? 'active' : ''}" ` +
+      `onclick="toggleDetect('${t.name}')">` +
+      `<span class="dot" style="background:${t.color};color:${t.color}"></span>${t.label}</button>`
+    ).join('');
+  }).catch(() => {});
+}
+function toggleDetect(name) {
+  api('/api/detect', {method: 'POST', headers: {'Content-Type': 'application/json'},
+                      body: JSON.stringify({name})})
+    .then(loadDetectors).catch(() => {});
+}
+
+/* ---------- 表情 ---------- */
+const EMOJI = {happy:'😊',laugh:'😄',love:'😍',sad:'😢',angry:'😠',surprised:'😲',scared:'😨',sleepy:'😴',thinking:'🤔',confused:'😕',neutral:'😐',wink:'😉'};
+api('/api/emotions').then(d => {
+  $('emo-grid').innerHTML = (d.emotions||[]).map(e =>
+    `<button class="emo-btn" onclick="api('/api/emotion?name=${e}')">${EMOJI[e]||'🙂'} ${e}</button>`).join('');
+});
+
+/* ---------- 技能调试 ---------- */
+function esc(s){ return String(s).replace(/"/g,'&quot;'); }
+api('/api/skills').then(d => {
+  const list = $('skill-list');
+  if (!d.skills || !d.skills.length) { list.innerHTML = '<div style="color:var(--muted)">没有已注册的技能</div>'; return; }
+  list.innerHTML = d.skills.map(s => {
+    const props = (s.parameters && s.parameters.properties) || {};
+    const inputs = Object.entries(props).map(([k, v]) => {
+      if (v.enum) return `<select class="skill-select" data-k="${k}">${v.enum.map(o=>`<option>${o}</option>`).join('')}</select>`;
+      const t = v.type === 'number' || v.type === 'integer' ? 'number' : 'text';
+      return `<input class="skill-input" data-k="${k}" type="${t}" placeholder="${esc(k)}" title="${esc(v.description||k)}">`;
+    }).join('');
+    return `<div class="skill-row" data-name="${s.name}">
+      <span class="skill-name">${s.name}</span>
+      <span class="skill-desc">${s.description||''}</span>
+      ${inputs}
+      <button class="skill-run" onclick="runSkillRow(this)">▶ 运行</button>
+      <div class="skill-result" style="display:none"></div>
+    </div>`;
+  }).join('');
+});
+function collectParams(row) {
+  const params = {};
+  row.querySelectorAll('[data-k]').forEach(el => {
+    if (el.value === '') return;
+    params[el.dataset.k] = el.type === 'number' ? parseFloat(el.value) : el.value;
+  });
+  return params;
+}
+function runSkillRow(btn) {
+  const row = btn.closest('.skill-row');
+  const name = row.dataset.name;
+  const params = collectParams(row);
+  const res = row.querySelector('.skill-result');
+  btn.disabled = true; btn.textContent = '…';
+  api('/api/skill/run', {method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({name, params})})
+    .then(d => {
+      res.style.display = 'block';
+      res.className = 'skill-result ' + (d.ok ? 'ok' : 'err');
+      res.textContent = `${d.ok?'✓':'✗'} ${d.result} (${d.ms}ms)`;
+    })
+    .catch(e => { res.style.display='block'; res.className='skill-result err'; res.textContent='✗ 请求失败'; })
+    .finally(() => { btn.disabled = false; btn.textContent = '▶ 运行'; });
+}
+function runSkill(name, params) {
+  api('/api/skill/run', {method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({name, params})})
+    .then(d => toast(d.result, !d.ok));
+}
+
+/* ---------- 对话 / TTS / ASR ---------- */
+function sendChat() {
+  const inp = $('chat-input');
+  const text = inp.value.trim();
+  if (!text) return;
+  inp.value = '';
+  api('/api/chat?text=' + encodeURIComponent(text)).then(d => {
+    const r = $('chat-reply');
+    r.style.display = 'block';
+    r.textContent = '🐾 ' + d.reply;
+    $('chat-meta').innerHTML =
+      `<span class="pill">表情 <b>${d.emotion}</b></span>` +
+      (d.tools_called||[]).map(t => `<span class="pill">🔧 <b>${t}</b></span>`).join('') +
+      (d.spoke ? `<span class="pill">🔊 已朗读</span>` : '');
+  });
+}
+function ttsSpeak() {
+  const text = $('tts-input').value.trim();
+  if (!text) return toast('先输入文本', true);
+  api('/api/tts', {method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({text})})
+    .then(d => d.ok ? toast('朗读中…') : toast(d.note, true));
+}
+let asrPolling = null;
+function asrOnce() {
+  $('btn-asr').disabled = true;
+  $('asr-result').textContent = '识别中…';
+  api('/api/asr/once', {method:'POST'}).then(d => {
+    if (!d.ok) { $('asr-result').textContent = d.note; $('btn-asr').disabled = false; return; }
+    asrPolling = setInterval(() => {
+      api('/api/asr/result').then(j => {
+        if (j.done) {
+          clearInterval(asrPolling);
+          $('asr-result').innerHTML = j.result ? `<b>${j.result}</b>` : '(没听清)';
+          $('btn-asr').disabled = false;
+          if (j.result) $('chat-input').value = j.result;
+        }
+      });
+    }, 800);
+  });
+}
+
+/* ---------- 日志 ---------- */
+function kindTag(k) { return `<span class="log-kind k-${k}">[${k}]</span>`; }
+function pollLogs() {
+  api('/api/logs?n=50').then(d => {
+    const box = $('log-console');
+    const news = (d.logs||[]).filter(l => l.id > lastLogId);
+    if (!news.length) return;
+    lastLogId = news[news.length-1].id;
+    news.forEach(l => {
+      const div = document.createElement('div');
+      div.className = 'log-line';
+      div.innerHTML = `<span class="lt">${l.ts}</span>${kindTag(l.kind)}<span>${l.msg}</span>`;
+      box.appendChild(div);
+    });
+    while (box.children.length > 80) box.removeChild(box.firstChild);
+    box.scrollTop = box.scrollHeight;
+  }).catch(()=>{});
+}
+function clearLogs() { $('log-console').innerHTML = ''; }
+
+/* ---------- 状态轮询 ---------- */
+function fmtUptime(s) {
+  const m = Math.floor(s/60), h = Math.floor(m/60);
+  return h ? `${h}h${m%60}m` : (m ? `${m}m${s%60}s` : `${s}s`);
+}
+function pollStatus() {
+  api('/api/status').then(d => {
+    pollFail = 0;
+    $('conn-dot').classList.add('on');
+    $('conn-text').textContent = '已连接';
+    $('uptime').textContent = '运行 ' + fmtUptime(d.uptime_s);
+
+    if (d.mood) {
+      $('bar-v').style.width = ((d.mood.valence + 1) / 2 * 100) + '%';
+      $('bar-a').style.width = (d.mood.arousal * 100) + '%';
+      $('bar-i').style.width = (d.mood.intensity * 100) + '%';
+      $('val-v').textContent = d.mood.valence.toFixed(2);
+      $('val-a').textContent = d.mood.arousal.toFixed(2);
+      $('val-i').textContent = d.mood.intensity.toFixed(2);
+      $('mood-name').textContent = d.mood.emotion;
+      $('mood-emo').textContent = EMOJI[d.mood.emotion] || '😐';
+    }
+    if (d.ptz) { $('ptz-h').textContent = d.ptz.h; $('ptz-v').textContent = d.ptz.v; }
+    if (d.base) {
+      $('base-cmd').textContent = d.base.command || 'stop';
+      $('speed-val').textContent = d.base.speed;
+      const sl = $('speed-slider');
+      if (document.activeElement !== sl) { sl.value = d.base.speed; speedInput(sl); }
+    }
+    if (d.system) {
+      if (d.system.cpu_percent != null) { $('bar-cpu').style.width = d.system.cpu_percent+'%'; $('val-cpu').textContent = d.system.cpu_percent+'%'; }
+      if (d.system.mem_percent != null) { $('bar-mem').style.width = d.system.mem_percent+'%'; $('val-mem').textContent = d.system.mem_percent+'%'; }
+      $('val-temp').textContent = d.system.temp_c != null ? d.system.temp_c + '℃' : 'N/A';
+    }
+    if (d.config && !$('cfg-badges').dataset.done) {
+      $('cfg-badges').dataset.done = 1;
+      $('cfg-badges').innerHTML =
+        `<span class="cfg-badge">LLM ${d.config.llm_backend}·${d.config.llm_model}</span>` +
+        `<span class="cfg-badge">ASR ${d.config.asr_mode}</span>` +
+        `<span class="cfg-badge">TTS ${d.config.tts_mode}</span>` +
+        `<span class="cfg-badge">名字 ${d.config.pet_name}</span>`;
+    }
+    if (d.camera) {
+      if (!!d.camera.open !== camOn) setCamUI(d.camera.open);
+    }
+  }).catch(() => {
+    if (++pollFail > 2) {
+      $('conn-dot').classList.remove('on');
+      $('conn-text').textContent = '连接断开';
+    }
+  });
+}
+
+speedInput($('speed-slider'));
+loadDetectors(); loadColorCfg();
+api('/api/track').then(pidSync).catch(() => {});
+pollStatus(); pollLogs();
+setInterval(pollStatus, 1000);
+setInterval(pollLogs, 1500);
+</script>
+</body>
+</html>

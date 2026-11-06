@@ -1,0 +1,36 @@
+# AI-PetCar 依赖
+# ==============
+# 树莓派 4B 2GB, 建议 Raspberry Pi OS (Bookworm)
+
+# === OLED ===
+luma.oled>=3.13.0
+Pillow>=9.0
+
+# === OpenCV 摄像头 ===
+# 树莓派装 headless 版省资源:
+opencv-python-headless>=4.8
+numpy>=1.24
+
+# === 原有硬件驱动 (AITank 自带, 但 pip 也可以装) ===
+# Adafruit-MotorHAT       # 如果不碰本地 deps/ 可以直接 pip 装
+
+# === TTS 语音合成 ===
+pyttsx3>=2.90
+# 或用系统 espeak (apt install espeak)
+
+# === ASR 语音识别 ===
+faster-whisper>=1.0
+sounddevice>=0.4
+
+# === LLM 后端 ===
+# Ollama 装完是命令行程序, Python 端用 requests 就行, 不用 pip 额外装
+# 可选:
+# volcengine-python-sdk   # 豆包
+# dashscope              # 通义
+
+# === Flask Web API ===
+Flask>=3.0
+
+# === 其他工具 ===
+requests>=2.31
+schedule>=1.2
