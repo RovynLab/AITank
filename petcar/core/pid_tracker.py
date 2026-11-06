@@ -48,7 +48,7 @@ class PIDTracker:
       目标角 = 当前角 - 误差px / PX_PER_DEG * 增益
     每帧直接对准, 不累积增量, 无延迟超调振荡。
     面板 Kp 滑条即增益 (kp*25): 1.0=一步对准, <1 更阻尼, >1 会振荡。
-    Ki/Kd 不再参与。"""
+    默认 kp=0.14 (增益 3.5)。Ki/Kd 不再参与。"""
 
     DEADZONE = 12        # 像素死区, 小于此不动 (防抖)
     LOST_TIMEOUT = 3.0   # 丢目标超过此秒数则清平滑状态
@@ -60,8 +60,8 @@ class PIDTracker:
         self.ptz = ptz
         self.get_color_cfg = get_color_cfg
         self._log = log or (lambda msg: None)
-        self.pid_x = PID(kp=0.03, ki=0.0, kd=0.0)   # kp 作为伺服增益
-        self.pid_y = PID(kp=0.03, ki=0.0, kd=0.0)
+        self.pid_x = PID(kp=0.14, ki=0.0, kd=0.0)   # kp 作为伺服增益
+        self.pid_y = PID(kp=0.14, ki=0.0, kd=0.0)
         self.target = "face"
         self.running = False
         self._thread = None
@@ -177,7 +177,7 @@ class PIDTracker:
                 self._exs = 0.5 * err_x + 0.5 * self._exs
                 self._eys = 0.5 * err_y + 0.5 * self._eys
                 # 绝对角度视觉伺服: 每帧直接算出应对准的角度, 不累积增量
-                # kp 滑条 0~0.08 → 增益 0~2, 1.0 = 一步对准
+                # kp 滑条 0~0.3 → 增益 0~7.5, 默认 0.14 (增益 3.5)
                 gain = self.pid_x.kp * 25.0
                 out_x = out_y = 0.0
                 if abs(self._exs) >= self.DEADZONE:

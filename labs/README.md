@@ -7,6 +7,7 @@
 #   Lab 08     运动学理论 (逆运动学公式)
 #   Lab 09     手柄控制 (pygame)
 #   Lab 10-11  云台控制
+#   Lab 12     手势识别 (凸包缺陷法示例, 面板版走 MediaPipe)
 #
 # 所有实验都是独立脚本, 直接 python3 运行即可.
 # 依赖统一的 deps/ 目录 (Adafruit_GPIO / Adafruit_PureIO).

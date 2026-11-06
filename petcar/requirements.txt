@@ -22,6 +22,10 @@ pyttsx3>=2.90
 faster-whisper>=1.0
 sounddevice>=0.4
 
+# === 手势识别 (面板「对象识别 → 手势识别」) ===
+# 可选: MediaPipe 可用时优先(需 CPU 支持 AES + 模型); 否则自动回退 OpenCV 凸包
+mediapipe>=0.10.9
+
 # === LLM 后端 ===
 # Ollama 装完是命令行程序, Python 端用 requests 就行, 不用 pip 额外装
 # 可选:

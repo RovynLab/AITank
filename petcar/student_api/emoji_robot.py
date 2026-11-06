@@ -29,6 +29,12 @@ robot.spin()
 time.sleep(2)
 robot.stop()
 
+# 宠物动作 (云台 + 底盘组合)
+robot.nod()
+robot.wag_tail()
+robot.twist()
+robot.spin_joy()
+
 # 云台
 robot.look_up()
 robot.look_left(20)
@@ -84,6 +90,7 @@ class EmojiRobot:
         self.mood = None
         self.mecanum = None
         self.ptz = None
+        self.action_player = None
         self.camera = None
         self.tts = None
         self.chat = None
@@ -112,6 +119,7 @@ class EmojiRobot:
         from petcar.skills.weather import WeatherSkill
         from petcar.skills.alarm import AlarmSkill
         from petcar.skills.emote import EmoteSkill
+        from petcar.skills.express import ExpressSkill, ExpressionPlayer
 
         # 驱动层
         self.oled = create_oled_driver()
@@ -119,6 +127,7 @@ class EmojiRobot:
         self.ptz = PTZDriver()
         self.camera = CameraDriver()
         self.tts = TTSDriver()
+        self.action_player = ExpressionPlayer(self.mecanum, self.ptz)
 
         # 核心引擎
         self.emotion = EmotionEngine(self.oled)
@@ -137,6 +146,7 @@ class EmojiRobot:
         self._skill_mgr.register(WeatherSkill())
         self._skill_mgr.register(AlarmSkill())
         self._skill_mgr.register(EmoteSkill(self.emotion))
+        self._skill_mgr.register(ExpressSkill(self.action_player))
 
         # LLM
         self.chat = ChatAgent(mood_engine=self.mood, skill_manager=self._skill_mgr)
@@ -149,6 +159,7 @@ class EmojiRobot:
     def close(self):
         """释放资源"""
         try:
+            if self.action_player: self.action_player.stop()
             if self.emotion: self.emotion.stop()
             if self.mood: self.mood.stop()
             if self.mecanum: self.mecanum.shutdown()
@@ -194,6 +205,31 @@ class EmojiRobot:
     def turnRight(self):       self.mecanum and self.mecanum.turnRight()
     def spin(self):            self.mecanum and self.mecanum.spin()
     def stop(self):            self.mecanum and self.mecanum.stop()
+
+    # ========================================================================
+    # 宠物动作 (云台 + 底盘组合，后台播放)
+    # ========================================================================
+    def do_action(self, name: str) -> bool:
+        if self.action_player is None:
+            print(f"[EmojiRobot] action={name} (未连接硬件)")
+            return False
+        return self.action_player.play(name)
+
+    def stop_action(self):
+        self.action_player and self.action_player.stop()
+
+    def nod(self):          return self.do_action("nod")
+    def shake_head(self):   return self.do_action("shake")
+    def tilt_head(self):    return self.do_action("tilt")
+    def wag_tail(self):     return self.do_action("wag")
+    def twist(self):        return self.do_action("twist")
+    def spin_joy(self):     return self.do_action("spin")
+    def nuzzle(self):       return self.do_action("nuzzle")
+    def hop(self):          return self.do_action("hop")
+    def droop(self):        return self.do_action("droop")
+    def lean_in(self):      return self.do_action("lean_in")
+    def look_around(self):  return self.do_action("look_around")
+    def stretch(self):      return self.do_action("stretch")
 
     # ========================================================================
     # 云台

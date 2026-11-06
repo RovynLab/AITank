@@ -86,6 +86,9 @@ def _connect_all():
     from petcar.skills.weather import WeatherSkill
     from petcar.skills.alarm import AlarmSkill
     from petcar.skills.emote import EmoteSkill
+    from petcar.skills.express import ExpressSkill, ExpressionPlayer
+
+    action_player = ExpressionPlayer(mecanum, ptz)
 
     sm = SkillManager()
     sm.register(MoveSkill(mecanum))
@@ -96,6 +99,7 @@ def _connect_all():
     sm.register(WeatherSkill())
     sm.register(AlarmSkill())
     sm.register(EmoteSkill(emotion))
+    sm.register(ExpressSkill(action_player))
 
     # LLM
     llm = create_llm_backend()
@@ -128,6 +132,7 @@ def _connect_all():
         "voice": voice,
         "skill_manager": sm,
         "block_service": block_service,
+        "action_player": action_player,
     }
 
 
@@ -193,6 +198,7 @@ def main():
                 asr=m["asr"],
                 skill_manager=m["skill_manager"],
                 block_service=m["block_service"],
+                action_player=m["action_player"],
             )
             if app:
                 # 后台线程启动 Flask
@@ -225,6 +231,7 @@ def main():
     finally:
         # 清理
         m["block_service"].shutdown()
+        m["action_player"].stop()
         m["mecanum"].stop()
         m["emotion"].stop()
         m["mood"].stop()

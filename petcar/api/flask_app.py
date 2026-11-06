@@ -16,6 +16,8 @@ REST API:
   POST /api/base/speed          → 设置底盘速度 {speed: 0-255}
   POST /api/estop               → 急停 (底盘停 + 停止追踪)
   POST /api/ptz                 → 云台 {direction, delta}
+  GET  /api/actions             → 宠物动作列表
+  POST /api/action              → 播放宠物动作 {action}
   GET  /api/photo               → 拍照 (返回路径)
   GET  /api/photo/latest        → 最近一张照片 (图片)
   GET  /api/faces               → 查人脸
@@ -98,7 +100,7 @@ def _sys_stats() -> dict:
 # ============================================================================
 def create_app(chat=None, emotion=None, mecanum=None, ptz=None, camera=None,
                mood_engine=None, tts=None, asr=None, skill_manager=None,
-               block_service=None):
+               block_service=None, action_player=None):
     """创建 Flask app。所有参数可选, 传了就用, 不传就 Mock/降级"""
     try:
         from flask import Flask, request, jsonify, Response, send_file
@@ -116,16 +118,27 @@ def create_app(chat=None, emotion=None, mecanum=None, ptz=None, camera=None,
         """积木程序运行时, 手动运动控制让位, 只保留急停和只读接口"""
         return bool(block_service and block_service.is_running())
 
+    def _cancel_action():
+        """手动控制前先中断正在播放的宠物动作, 避免两条指令抢底盘"""
+        if action_player is not None:
+            try:
+                action_player.stop()
+            except Exception:
+                pass
+
     # ASR 一次性识别任务状态
     asr_job = {"running": False, "result": None, "done": False}
 
     # 检测标注注册表: 每个检测器独立开关 (复选), 视频流只画已开启的框。
-    # detect 返回 [(x, y, w, h, score), ...] 原图坐标
+    # detect 返回 [(x, y, w, h, score[, text]), ...] 原图坐标,
+    # 第 6 项可选, 用于覆盖框上的文字 (手势识别等需要动态标签)
     annotators = {}
     try:
         from ..drivers.detectors import (get_detector, detect_tennis_ball,
                                          detect_motion, detect_color)
+        from ..drivers.gesture import GestureDetector
         _motion_state = {}
+        _gesture = GestureDetector(log=lambda msg: log.add("sys", msg))
         # 颜色识别 HSV 配置 (P1 面板可调, P2 颜色追踪复用)
         color_cfg = {"h_min": 25, "h_max": 45, "s_min": 90,
                      "s_max": 255, "v_min": 90, "v_max": 255}
@@ -182,6 +195,10 @@ def create_app(chat=None, emotion=None, mecanum=None, ptz=None, camera=None,
             "color": {"label": "颜色", "tag": "color", "color": (0, 220, 220),
                       "enabled": False,
                       "detect": lambda f: [(x, y, w, h, s) for x, y, w, h, s, _ in detect_color(f, color_cfg)]},
+            # 手势识别 (点击即开始), 框上叠加手势结果
+            "gesture": {"label": "手势识别", "tag": "gesture",
+                        "color": (255, 0, 200), "enabled": False,
+                        "detect": _gesture.detect},
         })
     except Exception as e:
         log.add("sys", f"检测器注册失败: {e}")
@@ -343,6 +360,7 @@ def create_app(chat=None, emotion=None, mecanum=None, ptz=None, camera=None,
     def base_move():
         if _blocks_busy():
             return jsonify({"ok": False, "error": "程序正在运行, 请先停止"}), 409
+        _cancel_action()
         if request.method == "GET":
             direction = request.args.get("direction", "forward")
             duration = float(request.args.get("duration", 2))
@@ -377,6 +395,7 @@ def create_app(chat=None, emotion=None, mecanum=None, ptz=None, camera=None,
                 block_service.stop(estop=True)
             except Exception:
                 pass
+        _cancel_action()
         if mecanum:
             mecanum.stop()
         if camera:
@@ -392,6 +411,7 @@ def create_app(chat=None, emotion=None, mecanum=None, ptz=None, camera=None,
     def ptz_api():
         if _blocks_busy():
             return jsonify({"ok": False, "error": "程序正在运行, 请先停止"}), 409
+        _cancel_action()
         if request.method == "GET":
             direction = request.args.get("direction", "center")
             delta = float(request.args.get("delta", 10))
@@ -410,6 +430,55 @@ def create_app(chat=None, emotion=None, mecanum=None, ptz=None, camera=None,
             return jsonify({"direction": direction, "delta": delta,
                             "h": ptz.h_cur, "v": ptz.v_cur})
         return jsonify({"direction": direction, "delta": delta})
+
+    # ========== /api/actions ==========
+    @app.route("/api/actions")
+    def actions_list():
+        from ..skills.express import list_actions
+        return jsonify({
+            "actions": list_actions(),
+            "busy": bool(action_player and action_player.is_busy()),
+            "current": action_player.current if action_player else None,
+        })
+
+    # ========== /api/action ==========
+    @app.route("/api/action", methods=["POST", "GET"])
+    def action_api():
+        if _blocks_busy():
+            return jsonify({"ok": False, "error": "程序正在运行, 请先停止"}), 409
+        if action_player is None:
+            return jsonify({"ok": False, "error": "动作播放器未连接"}), 503
+
+        if request.method == "GET":
+            name = request.args.get("action") or request.args.get("name") or "nod"
+        else:
+            data = request.get_json(silent=True) or {}
+            name = data.get("action") or data.get("name") or "nod"
+        name = str(name).strip().lower()
+
+        from ..skills.express import ACTIONS, action_duration
+        if name == "stop":
+            action_player.stop()
+            log.add("action", "停止动作")
+            return jsonify({"ok": True, "action": "stop"})
+
+        meta = ACTIONS.get(name)
+        if meta is None:
+            return jsonify({
+                "ok": False,
+                "error": f"未知动作: {name}",
+                "actions": list(ACTIONS),
+            }), 400
+
+        action_player.play(name)
+        log.add("action", f"{meta['label']} ({name})")
+        return jsonify({
+            "ok": True,
+            "action": name,
+            "label": meta["label"],
+            "emotion": meta["emotion"],
+            "duration": action_duration(meta["steps"]),
+        })
 
     # ========== /api/photo ==========
     @app.route("/api/photo")
@@ -475,9 +544,12 @@ def create_app(chat=None, emotion=None, mecanum=None, ptz=None, camera=None,
                     if active or track_box:
                         frame = frame.copy()
                         for a in active:
-                            for (x, y, w, h, score) in a["detect"](frame):
+                            for det in a["detect"](frame):
+                                x, y, w, h, score = det[:5]
+                                text = (det[5] if len(det) > 5 and det[5]
+                                        else a["tag"])
                                 cv2.rectangle(frame, (x, y), (x + w, y + h), a["color"], 2)
-                                cv2.putText(frame, f"{a['tag']} {score:.2f}",
+                                cv2.putText(frame, f"{text} {score:.2f}",
                                             (x, max(12, y - 6)),
                                             cv2.FONT_HERSHEY_SIMPLEX, 0.45, a["color"], 1)
                         if track_box:
@@ -588,6 +660,12 @@ def create_app(chat=None, emotion=None, mecanum=None, ptz=None, camera=None,
             out["base"] = {
                 "speed": mecanum.normal_speed,
                 "command": getattr(mecanum, "current_command", None),
+            }
+        # 动作
+        if action_player is not None:
+            out["action"] = {
+                "busy": action_player.is_busy(),
+                "name": action_player.current,
             }
         # 摄像头
         if camera:
