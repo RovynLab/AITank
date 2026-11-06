@@ -328,6 +328,11 @@ input[type=range]::-webkit-slider-thumb {
 .emo-btn:hover { border-color: var(--accent); background: var(--accent-dim); }
 .emo-btn:active { transform: scale(.94); }
 
+/* ---------- 宠物动作 ---------- */
+.action-grid { display:grid; grid-template-columns:repeat(4, 1fr); gap:8px; }
+.action-btn { padding:9px 4px; font-size:12px; white-space:nowrap; }
+.action-btn.playing { color:var(--accent); border-color:var(--accent); background:var(--accent-dim); }
+
 /* ---------- Toast ---------- */
 #toasts { position: fixed; top: 20px; right: 20px; display:flex; flex-direction:column; gap:8px; z-index:99; }
 .toast {
@@ -428,13 +433,11 @@ input[type=range]::-webkit-slider-thumb {
       <span class="pill">指令 <b id="base-cmd">--</b></span>
     </div>
 
-    <!-- ===== 路径规划 (预留: 走8字/画圆圈等运动学轨迹) ===== -->
+    <!-- ===== 宠物动作 (云台 + 底盘组合) ===== -->
     <div class="divider"></div>
-    <div class="detect-head">🛣️ 路径规划 <span class="detect-hint">预留 · 运动学轨迹</span></div>
-    <div style="display:flex;gap:8px;flex-wrap:wrap">
-      <button class="btn ghost" disabled title="待实现">走8字</button>
-      <button class="btn ghost" disabled title="待实现">画圆圈</button>
-      <button class="btn ghost" disabled title="待实现">自定义</button>
+    <div class="detect-head">🐾 宠物动作 <span class="detect-hint" id="action-state">云台 + 底盘组合</span></div>
+    <div class="action-grid" id="action-grid">
+      <span class="detect-hint">加载中…</span>
     </div>
   </div>
 
@@ -640,6 +643,51 @@ function ptz(direction) {
 }
 function estop() {
   api('/api/estop', {method:'POST'}).then(() => toast('已急停', true));
+}
+
+/* ---------- 宠物动作 ---------- */
+const actionLabels = {};
+function loadActions() {
+  api('/api/actions').then(d => {
+    const box = $('action-grid');
+    if (!d.actions || !d.actions.length) {
+      box.innerHTML = '<span class="detect-hint">暂无动作</span>';
+      return;
+    }
+    box.innerHTML = '';
+    d.actions.forEach(a => {
+      actionLabels[a.name] = a.label;
+      const btn = document.createElement('button');
+      btn.className = 'btn ghost action-btn';
+      btn.dataset.action = a.name;
+      btn.title = `${a.emotion} · ${a.duration}s`;
+      btn.textContent = a.label;
+      btn.onclick = () => playAction(a.name);
+      box.appendChild(btn);
+    });
+  }).catch(() => {
+    $('action-grid').innerHTML = '<span class="detect-hint">动作列表加载失败</span>';
+  });
+}
+function playAction(name) {
+  api('/api/action', {method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({action:name})})
+    .then(d => {
+      if (!d.ok) { toast(d.error || '动作失败', true); return; }
+      toast(`正在${d.label}`);
+    })
+    .catch(() => toast('动作指令失败', true));
+}
+function syncActionState(action) {
+  const hint = $('action-state');
+  if (hint) {
+    hint.textContent = action.busy
+      ? `正在${actionLabels[action.name] || action.name}`
+      : '云台 + 底盘组合';
+  }
+  document.querySelectorAll('.action-btn').forEach(btn => {
+    btn.classList.toggle('playing', action.busy && btn.dataset.action === action.name);
+  });
 }
 
 /* ---------- 视频流管理 ---------- */
@@ -1151,6 +1199,7 @@ function pollStatus() {
       $('mood-emo').textContent = EMOJI[d.mood.emotion] || '😐';
     }
     if (d.ptz) { $('ptz-h').textContent = d.ptz.h; $('ptz-v').textContent = d.ptz.v; }
+    if (d.action) syncActionState(d.action);
     if (d.base) {
       $('base-cmd').textContent = d.base.command || 'stop';
       $('speed-val').textContent = d.base.speed;
@@ -1184,7 +1233,7 @@ function pollStatus() {
 speedInput($('speed-slider'));
 loadDetectors(); loadColorCfg();
 api('/api/track').then(pidSync).catch(() => {});
-pollStatus(); pollLogs();
+pollStatus(); pollLogs(); loadActions();
 setInterval(pollStatus, 1000);
 setInterval(pollLogs, 1500);
 </script>
