@@ -300,8 +300,55 @@ input[type=range]::-webkit-slider-thumb {
 }
 .chat-meta { display:flex; gap:6px; margin-top:8px; flex-wrap:wrap; }
 .chat-meta .pill { font-size:11px; }
-.chat-tools { display:flex; gap:8px; margin-top:10px; flex-wrap:wrap; }
 .mini-label { font-size:11px; color: var(--muted); margin-bottom:4px; }
+
+/* 语音区: ASR / TTS 两块并排 */
+.sec-head { display:flex; align-items:baseline; gap:8px; margin-bottom:6px; }
+.sec-title { font-size:13px; font-weight:600; }
+.sec-hint { font-size:11px; color:var(--muted); line-height:1.6; margin-bottom:10px; }
+.voice-grid { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+.voice-box {
+  background: rgba(255,255,255,.03); border:1px solid var(--card-border);
+  border-radius: 12px; padding:10px 12px;
+  display:flex; flex-direction:column; gap:8px;
+}
+.vb-title { font-size:12px; font-weight:600; display:flex; align-items:center; gap:6px; }
+.vb-desc { font-size:11px; color:var(--muted); line-height:1.6; flex:1; }
+.badge {
+  margin-left:auto; font-size:10px; font-weight:400; font-family:var(--mono);
+  padding:2px 8px; border-radius:999px; white-space:nowrap;
+  border:1px solid var(--card-border); color:var(--muted);
+}
+.badge.ok { color:var(--accent); border-color:rgba(52,211,153,.4); background:var(--accent-dim); }
+.badge.warn { color:var(--warn); border-color:rgba(251,191,36,.4); background:rgba(251,191,36,.1); }
+.asr-result {
+  flex:1; min-width:0; min-height:34px; display:flex; align-items:center;
+  padding:6px 10px; border-radius:9px; font-size:13px; color:var(--muted);
+  background: rgba(255,255,255,.04); border:1px dashed var(--card-border);
+  overflow-wrap:anywhere;
+}
+.asr-result.has { color:var(--text); border:1px solid rgba(52,211,153,.4); background:var(--accent-dim); }
+.asr-result.listening { color:var(--accent); border-color:rgba(52,211,153,.5); animation:pulse-soft 1.4s infinite; }
+@keyframes pulse-soft { 0%,100%{opacity:1} 50%{opacity:.55} }
+.warn-line { display:none; font-size:11px; line-height:1.6; color:var(--warn); }
+.warn-line.show { display:block; }
+
+/* 全链路自检步骤条 */
+.steps { display:flex; gap:6px; flex-wrap:wrap; align-items:center; }
+.step {
+  font-size:11px; padding:3px 10px; border-radius:999px; color:var(--muted);
+  background: rgba(255,255,255,.04); border:1px solid var(--card-border);
+  transition:.2s;
+}
+.step.active { color:var(--accent); border-color:var(--accent); background:var(--accent-dim); }
+.step.done { color:var(--text); border-color:rgba(52,211,153,.35); }
+.step.err { color:var(--danger); border-color:rgba(248,113,113,.45); background:rgba(248,113,113,.1); }
+.voice-out { font-size:13px; line-height:1.8; white-space:pre-line; margin-top:8px; }
+.voice-out .who { color:var(--muted); }
+.voice-detail { margin-top:6px; font-size:11px; font-family:var(--mono); color:var(--muted); }
+.voice-detail summary { cursor:pointer; }
+.voice-detail div { margin-top:4px; line-height:1.7; }
+@media (max-width:720px) { .voice-grid { grid-template-columns:1fr; } }
 .log-console {
   background: #06090d;
   border:1px solid var(--card-border);
@@ -403,6 +450,13 @@ input[type=range]::-webkit-slider-thumb {
 }
 .cfg-field .hint { font-size:10px; color:var(--muted); margin-top:3px; line-height:1.45; }
 .cfg-field .hint .env { color:var(--warn); }
+/* 依赖未满足: 灰掉整行, 不可编辑 */
+.cfg-field.cfg-off { opacity:.38; }
+.cfg-field.cfg-off label { cursor:not-allowed; }
+.cfg-field.cfg-off input, .cfg-field.cfg-off textarea,
+.cfg-field.cfg-off select { cursor:not-allowed; }
+.cfg-field .cfg-dep { font-size:10px; color:var(--muted); margin-top:3px; display:none; }
+.cfg-field.cfg-off .cfg-dep { display:block; }
 .cfg-foot { display:flex; gap:8px; padding:12px 18px; border-top:1px solid var(--card-border); }
 .cfg-foot .btn { flex:1; }
 
@@ -620,37 +674,59 @@ input[type=range]::-webkit-slider-thumb {
 
   <!-- ===== 对话 / 语音 ===== -->
   <div class="card" id="card-chat">
-    <h2>💬 LLM 对话 / 语音</h2>
+    <h2>💬 对话 / 语音 <span class="tag">打字聊 · 语音听写 · 喇叭试听</span></h2>
     <div class="chat-row">
       <input type="text" id="chat-input" placeholder="对 AITank 说点什么… (回车发送)" onkeydown="if(event.key==='Enter')sendChat()">
       <button class="btn" onclick="sendChat()">发送</button>
     </div>
     <div class="chat-reply" id="chat-reply"></div>
     <div class="chat-meta" id="chat-meta"></div>
+
     <div class="divider"></div>
-    <div class="chat-tools">
-      <div style="flex:1;min-width:200px">
-        <div class="mini-label">TTS 试听</div>
+
+    <div class="voice-grid">
+      <!-- 语音识别 ASR -->
+      <div class="voice-box">
+        <div class="vb-title">🎤 让它听你说 <span class="badge" id="asr-badge">检测中…</span></div>
+        <div class="vb-desc">语音识别（ASR）：把你说的话变成文字。<br>点「开始听」→ 凑近小车说一句话 → 识别出的文字会自动填进上面的输入框。</div>
         <div class="chat-row">
-          <input type="text" id="tts-input" placeholder="要朗读的文本">
-          <button class="btn ghost" onclick="ttsSpeak()">朗读</button>
+          <button class="btn" id="btn-asr" onclick="asrOnce()" style="flex-shrink:0">🎙 开始听</button>
+          <div class="asr-result" id="asr-result">点按钮后对着小车麦克风说话</div>
         </div>
+        <div class="warn-line" id="asr-warn"></div>
       </div>
-      <div style="flex:1;min-width:200px">
-        <div class="mini-label">ASR 单句识别 (在小车旁说话)</div>
+      <!-- 语音合成 TTS -->
+      <div class="voice-box">
+        <div class="vb-title">🔊 让它说给你听 <span class="badge" id="tts-badge">检测中…</span></div>
+        <div class="vb-desc">语音合成（TTS）：把文字读出来。<br>输入一句话点「朗读」，用来试小车的音量、音色和语速。</div>
         <div class="chat-row">
-          <button class="btn ghost" id="btn-asr" onclick="asrOnce()">开始识别</button>
-          <span class="pill" style="align-self:center" id="asr-result">--</span>
+          <input type="text" id="tts-input" placeholder="要小车读的话，比如：你好，我是小强">
+          <button class="btn ghost" onclick="ttsSpeak()" style="flex-shrink:0">朗读</button>
         </div>
       </div>
     </div>
+
     <div class="divider"></div>
-    <div class="mini-label">对话测试 (小强先说话 → 你说话 → 抓包分析)</div>
-    <div class="chat-row">
-      <button class="btn" id="btn-voice-test" onclick="voiceTest()">对话测试</button>
-      <span class="pill" style="align-self:center" id="voice-test-stage">--</span>
+
+    <div class="sec-head">
+      <span class="sec-title">🧪 全链路自检</span>
+      <span class="tag">麦克风 → 识别 → 回答 → 喇叭，一次跑通</span>
     </div>
-    <div class="chat-meta" id="voice-test-out" style="white-space:pre-line;line-height:1.7"></div>
+    <div class="sec-hint">小车先说一句，你回它一句，它识别后再语音回答。用来确认整条语音链路都正常，测试前请确认喇叭和麦克风已插好。</div>
+    <div class="chat-row" style="align-items:center;flex-wrap:wrap">
+      <button class="btn" id="btn-voice-test" onclick="voiceTest()">开始自检</button>
+      <div class="steps" id="vt-steps">
+        <span class="step" data-i="0">① 小车说话</span>
+        <span class="step" data-i="1">② 你说话</span>
+        <span class="step" data-i="2">③ 识别</span>
+        <span class="step" data-i="3">④ 回答</span>
+      </div>
+    </div>
+    <div class="voice-out" id="voice-test-out"></div>
+    <details class="voice-detail" id="vt-detail" style="display:none">
+      <summary>技术细节（拾音时长 / 峰值 / 阈值 / 置信度）</summary>
+      <div id="vt-detail-body"></div>
+    </details>
   </div>
 
   <!-- ===== 日志 ===== -->
@@ -735,6 +811,7 @@ function renderCfg(groups) {
       fs.map(fieldHtml).join('') + '</div>';
   }).join('');
   $('cfg-body').innerHTML = html || '<div class="hint">没有可配置项</div>';
+  updateCfgState();
 }
 function fieldHtml(f) {
   const id = 'cfg-' + f.key;
@@ -765,13 +842,34 @@ function fieldHtml(f) {
   const helpIcon = (f.desc || f.help)
     ? `<span class="cfg-help" data-tip="${escHtml(f.desc || f.help)}" role="button" aria-label="查看说明">?</span>`
     : '';
-  return `<div class="cfg-field"><label for="${id}">${escHtml(f.label)}${helpIcon}${badges}</label>${input}${hint}${env}</div>`;
+  const when = f.when ? ` data-when="${escHtml(JSON.stringify(f.when))}"` : '';
+  const dep = f.when ? `<div class="cfg-dep">${escHtml(cfgDepText(f))}</div>` : '';
+  return `<div class="cfg-field" id="cfg-row-${f.key}"${when}>` +
+    `<label for="${id}">${escHtml(f.label)}${helpIcon}${badges}</label>${input}${hint}${env}${dep}</div>`;
+}
+function cfgDepText(f) {
+  const ctl = cfgFields.find(x => x.key === f.when.field);
+  const label = ctl ? ctl.label : f.when.field;
+  return `需先把「${label}」设为 ${(f.when.in || []).join(' 或 ')}`;
+}
+/* 关联配置: 控制项取值不满足条件时灰掉并禁用 */
+function updateCfgState() {
+  cfgFields.forEach(f => {
+    if (!f.when) return;
+    const row = $('cfg-row-' + f.key);
+    const ctl = $('cfg-' + f.when.field);
+    if (!row || !ctl) return;
+    const on = (f.when.in || []).some(v => String(v) === String(ctl.value));
+    row.classList.toggle('cfg-off', !on);
+    const el = $('cfg-' + f.key);
+    if (el) el.disabled = !on;
+  });
 }
 function saveCfg() {
   const patch = {};
   cfgFields.forEach(f => {
     const el = $('cfg-' + f.key);
-    if (!el) return;
+    if (!el || el.disabled) return;
     const v = el.value;
     if (f.type === 'password') { if (v !== '') patch[f.key] = v; return; }
     if (v === '' && (f.type === 'number' || f.type === 'select')) return;
@@ -851,6 +949,10 @@ function hideCfgTip() {
     if (el) { e.preventDefault(); showCfgTip(el); }
   });
   body.addEventListener('scroll', hideCfgTip);
+  // 控制项一变就重新计算哪些关联项该亮/灰
+  body.addEventListener('change', e => {
+    if (e.target.closest('.cfg-field')) updateCfgState();
+  });
   document.addEventListener('click', e => {
     if (!e.target.closest('.cfg-help')) hideCfgTip();
   });
@@ -1373,58 +1475,142 @@ function sendChat() {
 }
 function ttsSpeak() {
   const text = $('tts-input').value.trim();
-  if (!text) return toast('先输入文本', true);
+  if (!text) return toast('先输入要读的文字', true);
   api('/api/tts', {method:'POST', headers:{'Content-Type':'application/json'},
     body: JSON.stringify({text})})
-    .then(d => d.ok ? toast('朗读中…') : toast(d.note, true));
+    .then(d => d.ok ? toast('🔊 正在朗读…') : toast(d.note || '朗读失败', true))
+    .catch(() => toast('请求失败', true));
 }
+
+/* 麦克风状态: 根据后端实际驱动模式说明现在能不能用 */
+let voiceSig = '';
+function syncVoiceBadges(v) {
+  v = v || {};
+  const sig = `${v.asr}|${v.tts}`;
+  if (sig === voiceSig) return;
+  voiceSig = sig;
+
+  const ab = $('asr-badge'), aw = $('asr-warn'), btn = $('btn-asr');
+  if (!v.asr) {
+    ab.className = 'badge warn'; ab.textContent = '未连接';
+    aw.className = 'warn-line show';
+    aw.textContent = '后端没有启用语音识别，检查启动参数里是否带了 --voice。';
+    btn.disabled = true;
+  } else if (v.asr === 'mock') {
+    ab.className = 'badge warn'; ab.textContent = 'mock 模式';
+    aw.className = 'warn-line show';
+    aw.textContent = '当前是 mock 模式，不会真的收音。请用 python run_petcar.py --voice 启动后刷新本页。';
+    btn.disabled = true;
+  } else {
+    ab.className = 'badge ok'; ab.textContent = `whisper · 本地识别`;
+    aw.className = 'warn-line'; aw.textContent = '';
+    btn.disabled = false;
+  }
+
+  const tb = $('tts-badge');
+  if (!v.tts) { tb.className = 'badge warn'; tb.textContent = '未连接'; }
+  else if (v.tts === 'mock') { tb.className = 'badge warn'; tb.textContent = 'mock 模式'; }
+  else { tb.className = 'badge ok'; tb.textContent = v.tts; }
+}
+
 let asrPolling = null;
 function asrOnce() {
-  $('btn-asr').disabled = true;
-  $('asr-result').textContent = '识别中…';
+  const btn = $('btn-asr'), res = $('asr-result');
+  if (asrPolling) return;
+  btn.disabled = true;
+  btn.textContent = '🎧 正在听…';
+  res.className = 'asr-result listening';
+  res.textContent = '请现在对着小车的麦克风说一句话';
+
   api('/api/asr/once', {method:'POST'}).then(d => {
-    if (!d.ok) { $('asr-result').textContent = d.note; $('btn-asr').disabled = false; return; }
+    if (!d.ok) {
+      res.className = 'asr-result';
+      res.textContent = '无法开始：' + (d.note || '未知错误');
+      btn.disabled = false; btn.textContent = '🎙 开始听';
+      return;
+    }
     asrPolling = setInterval(() => {
       api('/api/asr/result').then(j => {
-        if (j.done) {
-          clearInterval(asrPolling);
-          $('asr-result').innerHTML = j.result ? `<b>${j.result}</b>` : '(没听清)';
-          $('btn-asr').disabled = false;
-          if (j.result) $('chat-input').value = j.result;
+        if (!j.done) return;
+        clearInterval(asrPolling); asrPolling = null;
+        btn.disabled = false; btn.textContent = '🎙 开始听';
+        if (j.result) {
+          res.className = 'asr-result has';
+          res.innerHTML = `🗣️ <b>${j.result}</b>`;
+          $('chat-input').value = j.result;   // 自动填进对话框, 回车即可发送
+          toast('已填进对话框，回车就能发给它');
+        } else {
+          res.className = 'asr-result';
+          res.textContent = '没听清：靠近一点、说大声些，再点一次「开始听」';
         }
-      });
-    }, 800);
+      }).catch(() => {});
+    }, 700);
+  }).catch(() => {
+    res.className = 'asr-result';
+    res.textContent = '请求失败，检查网络或小车是否在线';
+    btn.disabled = false; btn.textContent = '🎙 开始听';
   });
 }
 
-/* ---------- 对话测试 ---------- */
+/* ---------- 全链路自检 ---------- */
 let voicePolling = null;
-const VOICE_STAGE = {speaking:'小强正在说话…', listening:'正在听你说话…',
-                     thinking:'思考中…', speaking_reply:'小强回答中…', done:'完成'};
+// 后端 stage → 步骤条索引
+const VT_STAGE_I = {speaking:0, listening:1, thinking:2, speaking_reply:3};
+function vtStep(i, err) {
+  document.querySelectorAll('#vt-steps .step').forEach(el => {
+    const k = +el.dataset.i;
+    el.className = 'step' + (err && k === i ? ' err'
+      : k < i ? ' done' : k === i ? ' active' : '');
+  });
+}
 function voiceTest() {
-  const out = $('voice-test-out'), stage = $('voice-test-stage');
-  out.textContent = ''; stage.textContent = '启动…';
+  const out = $('voice-test-out'), detail = $('vt-detail');
+  out.textContent = ''; detail.style.display = 'none';
   $('btn-voice-test').disabled = true;
+  $('btn-voice-test').textContent = '自检中…';
+  vtStep(0);
+
   api('/api/voice_test', {method:'POST'}).then(d => {
-    if (!d.ok) { stage.textContent = d.note || '启动失败'; $('btn-voice-test').disabled = false; return; }
+    if (!d.ok) {
+      out.textContent = '无法开始：' + (d.note || '启动失败');
+      $('btn-voice-test').disabled = false; $('btn-voice-test').textContent = '开始自检';
+      vtStep(-1);
+      return;
+    }
     if (voicePolling) clearInterval(voicePolling);
     voicePolling = setInterval(() => {
       api('/api/voice_test/result').then(j => {
-        stage.textContent = VOICE_STAGE[j.stage] || j.stage;
-        if (!j.done) return;
+        if (!j.done) {
+          vtStep(VT_STAGE_I[j.stage] ?? 0);
+          if (j.stage === 'listening') out.textContent = '请现在对小车说话…';
+          return;
+        }
         clearInterval(voicePolling); voicePolling = null;
-        $('btn-voice-test').disabled = false;
-        stage.textContent = j.error ? '出错' : '完成';
-        const lines = [`① 小强：${j.prompt}`];
-        if (j.ms !== null && j.ms !== undefined)
-          lines.push(`② 拾音：${(j.ms/1000).toFixed(1)}s　峰值 ${j.peak}　阈值 ${j.threshold}`);
-        lines.push(`③ 识别：${j.text || '(没听清)'}`);
-        if (j.logprob !== null && j.logprob !== undefined) lines.push(`   置信度 ${j.logprob}`);
-        if (j.reply) lines.push(`④ 回复：${j.reply}`);
-        if (j.error) lines.push(`错误：${j.error}`);
-        out.textContent = lines.join('\n');
-      });
-    }, 800);
+        $('btn-voice-test').disabled = false; $('btn-voice-test').textContent = '开始自检';
+        vtStep(j.error ? 3 : 4, !!j.error);
+
+        if (j.error) {
+          out.textContent = '自检出错：' + j.error;
+        } else {
+          out.innerHTML =
+            `<span class="who">它说：</span>${j.prompt}\n` +
+            `<span class="who">你说：</span>${j.text ? '<b>' + j.text + '</b>' : '（没听清）'}` +
+            (j.reply ? `\n<span class="who">它回答：</span>${j.reply}` : '');
+          if (!j.text) out.innerHTML += '\n靠近麦克风、说大声些再试一次';
+        }
+
+        if (j.ms !== null && j.ms !== undefined) {
+          detail.style.display = 'block';
+          $('vt-detail-body').textContent =
+            `拾音 ${(j.ms/1000).toFixed(1)}s · 峰值 ${j.peak} · 阈值 ${j.threshold}` +
+            (j.logprob !== null && j.logprob !== undefined ? ` · 置信度 ${j.logprob}` : '');
+        }
+      }).catch(() => {});
+    }, 700);
+  }).catch(() => {
+    out.textContent = '请求失败，检查网络或小车是否在线';
+    $('btn-voice-test').disabled = false; $('btn-voice-test').textContent = '开始自检';
+    vtStep(-1);
   });
 }
 
@@ -1491,6 +1677,7 @@ function pollStatus() {
         `<span class="cfg-badge">TTS ${d.config.tts_mode}</span>` +
         `<span class="cfg-badge">名字 ${d.config.pet_name}</span>`;
     }
+    syncVoiceBadges(d.voice);
     if (d.camera) {
       if (!!d.camera.open !== camOn) setCamUI(d.camera.open);
     }

@@ -70,6 +70,8 @@ def step_push(c):
     local = os.path.join(LOCAL_ROOT, "petcar")
     run(c, f"mkdir -p {REMOTE_ROOT}", timeout=10)
     scp_dir(c, local, REMOTE_ROOT)
+    # scp 不保留可执行位，这里补上 start.sh 等脚本的 +x
+    run(c, f"chmod +x {REMOTE_ROOT}/petcar/*.sh 2>/dev/null || true", timeout=10)
     run(c, f"ls -la {REMOTE_ROOT}/petcar/", timeout=10)
 
 # ---------- 2. pip 依赖 ----------

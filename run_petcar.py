@@ -97,7 +97,8 @@ def start(c, port: int, full: bool, voice: bool = False,
 
     mode = f"语音对话 (whisper {os.environ.get('PETCAR_WHISPER_MODEL', 'base')})" \
         if voice else ("完整语音" if full else "快速模式")
-    args = f"--port {port}" if voice else f"--flask --port {port}"
+    # 不传 --flask: 让 main.py 同时跑 Flask 和语音循环, 否则机器人根本不收音
+    args = f"--port {port}"
 
     cmd = (
         f"cd {REMOTE_ROOT} && {env}"
@@ -108,7 +109,7 @@ def start(c, port: int, full: bool, voice: bool = False,
     print(f"[..] 启动中 (端口 {port}, {mode})")
 
     ok = False
-    for i in range(60):
+    for i in range(120):   # whisper 模型加载可能超过 60s
         time.sleep(1)
         code = sh(c, f"curl -s -o /dev/null -w '%{{http_code}}' http://127.0.0.1:{port}/")
         if code == "200":
@@ -120,6 +121,10 @@ def start(c, port: int, full: bool, voice: bool = False,
     if ok:
         print(f"[OK] 已启动 → http://{HOST}:{port}/")
         print(f"     积木编程 → http://{HOST}:{port}/blocks")
+    elif is_running(c):
+        # whisper 首次加载可能超过等待时间, 进程还活着就不是失败
+        print(f"[..] 进程已启动, Web 尚未就绪 (模型加载较慢), 稍等再访问 http://{HOST}:{port}/")
+        print(sh(c, f"tail -n 20 {LOG_FILE}"))
     else:
         print("[FAIL] 启动失败, 最近日志:")
         print(sh(c, f"tail -n 40 {LOG_FILE}"))
@@ -161,6 +166,8 @@ def main() -> None:
 
     c = connect()
     try:
+        # 保证板端启动脚本可执行（Windows 提交的文件默认没有 +x）
+        sh(c, f"chmod +x {REMOTE_ROOT}/petcar/start.sh 2>/dev/null || true")
         if args.stop:
             stop(c)
             return

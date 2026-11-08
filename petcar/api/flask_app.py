@@ -705,6 +705,9 @@ def create_app(chat=None, emotion=None, mecanum=None, ptz=None, camera=None,
             "tts_mode": config.TTS_MODE,
             "pet_name": config.PET_NAME,
         }
+        # 语音驱动实际模式 (加载失败会回退 mock, 与配置值可能不同)
+        out["voice"] = {"asr": getattr(asr, "mode", None),
+                        "tts": getattr(tts, "mode", None)}
         return jsonify(out)
 
     # ========== /api/logs ==========
@@ -771,13 +774,16 @@ def create_app(chat=None, emotion=None, mecanum=None, ptz=None, camera=None,
             asr_job["running"] = True
             asr_job["done"] = False
             asr_job["result"] = None
+            asr.paused = True          # 暂停后台语音主循环, 别抢麦克风
+            asr.abort_listen()
             try:
-                log.add("asr", "开始识别 (whisper 模式需在小车终端按 Enter)")
-                asr_job["result"] = asr.listen(timeout=6)
+                log.add("asr", "开始识别 (面板触发, 自动收音, 最多 6s)")
+                asr_job["result"] = asr.listen(timeout=6, auto=True, exclusive=True)
                 log.add("asr", f"识别结果: {asr_job['result'] or '(没听清)'}")
             except Exception as e:
                 asr_job["result"] = f"识别异常: {e}"
             finally:
+                asr.release()
                 asr_job["running"] = False
                 asr_job["done"] = True
 
@@ -807,9 +813,10 @@ def create_app(chat=None, emotion=None, mecanum=None, ptz=None, camera=None,
         def work():
             try:
                 asr.paused = True          # 暂停后台语音主循环, 别抢麦克风
+                asr.abort_listen()
                 tts.speak(prompt)
                 voice_job["stage"] = "listening"
-                text = asr.listen(timeout=12)
+                text = asr.listen(timeout=12, auto=True, exclusive=True)
                 voice_job.update({
                     "text": text,
                     "peak": asr.last_debug.get("peak"),
@@ -831,7 +838,7 @@ def create_app(chat=None, emotion=None, mecanum=None, ptz=None, camera=None,
             except Exception as e:
                 voice_job["error"] = str(e)
             finally:
-                asr.paused = False
+                asr.release()
                 voice_job["running"] = False
                 voice_job["stage"] = "done"
                 voice_job["done"] = True

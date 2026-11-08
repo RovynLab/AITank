@@ -34,6 +34,7 @@ class ASRDriver:
         self.last_debug = {}
         self.paused = False
         self._lock = threading.Lock()
+        self._abort = threading.Event()   # 打断正在进行的收音 (面板要独占麦克风)
         self._audio_queue: "queue.Queue[bytes]" = queue.Queue()
         self._running = False
 
@@ -102,15 +103,36 @@ class ASRDriver:
             self._resolve_input_device()
 
     # ========================================================================
-    def listen(self, timeout: float = 5.0) -> Optional[str]:
-        """录音识别一段语音。超时或没听清返回 None。"""
+    def listen(self, timeout: float = 5.0, auto: bool = False,
+               exclusive: bool = False) -> Optional[str]:
+        """录音识别一段语音。超时或没听清返回 None。
+
+        auto=True 时忽略终端交互, 直接走自动 VAD 收音 —— 面板上点按钮触发的
+        识别走这条路径, 否则人在 Web 端点按钮、却还要跑去小车终端按 Enter。
+        exclusive=True 表示面板要独占麦克风: 打断后台主循环正在收的那一路,
+        且主循环这一次收音直接让路, 不用等它 15s 超时。
+        """
+        if exclusive:
+            self._abort.set()
         # 同一时刻只能有一路再抢麦克风 (面板测试 vs 语音主循环)
         with self._lock:
+            if not exclusive and self._abort.is_set():
+                return None
+            self._abort.clear()
             if self.mode == "mock":
                 return self._listen_mock(timeout)
             elif self.mode == "whisper":
-                return self._listen_whisper(timeout)
+                return self._listen_whisper(timeout, force_auto=auto)
             return None
+
+    def abort_listen(self):
+        """打断当前这次收音, 让出麦克风 (面板点按钮时先调它, 不用等满超时)"""
+        self._abort.set()
+
+    def release(self):
+        """面板用完麦克风, 恢复后台语音主循环收音"""
+        self.paused = False
+        self._abort.clear()
 
     def _listen_mock(self, timeout: float) -> Optional[str]:
         """Mock 模式: 直接从命令行输入"""
@@ -120,14 +142,14 @@ class ASRDriver:
         except (EOFError, KeyboardInterrupt):
             return None
 
-    def _listen_whisper(self, timeout: float) -> Optional[str]:
+    def _listen_whisper(self, timeout: float, force_auto: bool = False) -> Optional[str]:
         """录音 + whisper 识别"""
         try:
             import sounddevice as sd
             import numpy as np
 
             device = self._input_device
-            interactive = sys.stdin.isatty()
+            interactive = sys.stdin.isatty() and not force_auto
 
             # 有终端时手动控制录音; 后台运行(/dev/null)时自动录音
             if interactive:
@@ -169,7 +191,7 @@ class ASRDriver:
                 with sd.InputStream(device=device, samplerate=sample_rate,
                                     channels=1, dtype='int16', blocksize=chunk,
                                     callback=_cb):
-                    while (time.time() - start) < timeout:
+                    while (time.time() - start) < timeout and not self._abort.is_set():
                         try:
                             data = chunks.get(timeout=0.5)
                         except queue.Empty:
@@ -230,7 +252,8 @@ class ASRDriver:
                 with sd.InputStream(device=device, samplerate=sample_rate,
                                     channels=1, dtype='int16', blocksize=chunk,
                                     callback=callback):
-                    while not stop.is_set() and (time.time() - start) < timeout:
+                    while (not stop.is_set() and not self._abort.is_set()
+                           and (time.time() - start) < timeout):
                         time.sleep(0.05)
 
                 if not recorded:

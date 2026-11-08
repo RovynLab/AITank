@@ -190,6 +190,12 @@ def main():
         run_flask, run_voice = True, True
     # else: 默认两个都开
 
+    # ASR=mock 且后台运行 (stdin 是 /dev/null) 时没有输入源, 语音循环只会空转
+    if run_voice and m["asr"].mode == "mock" and not sys.stdin.isatty():
+        print("[VoiceIO] ASR=mock 且无终端输入, 跳过语音循环 "
+              "(在面板把 ASR 模式设为 whisper 后重启即可)")
+        run_voice = False
+
     try:
         if run_flask:
             from petcar.api.flask_app import create_app
