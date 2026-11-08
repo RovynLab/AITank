@@ -25,6 +25,9 @@ REST API:
   GET  /api/skills              → 技能列表 (name/desc/参数 schema)
   POST /api/skill/run           → 执行技能 {name, params}
   GET  /api/status              → 聚合状态 (心情/云台/底盘/系统/配置)
+  GET  /api/config              → 面板配置项 (分组/当前值/是否需重启)
+  POST /api/config              → 保存面板配置 {patch:{key:value}} 并热生效
+  POST /api/config/reset        → 恢复 config.py / 环境变量默认值
   GET  /api/logs?n=50           → 最近事件日志
   POST /api/tts                 → TTS 试听 {text}
   POST /api/asr/once            → 启动一次 ASR 识别 (后台)
@@ -109,6 +112,10 @@ def create_app(chat=None, emotion=None, mecanum=None, ptz=None, camera=None,
         return None
 
     from petcar import config
+    from petcar.core import runtime_config
+
+    # 独立启动 (非 petcar.main) 时也能加载面板保存的配置; 已加载则跳过
+    runtime_config.load()
 
     app = Flask(__name__, static_folder=os.path.join(_HERE, "static"))
     log = EventLog()
@@ -126,8 +133,24 @@ def create_app(chat=None, emotion=None, mecanum=None, ptz=None, camera=None,
             except Exception:
                 pass
 
+    # 面板配置 → 运行中模块的热应用 (需重启项不在内)
+    _LLM_KEYS = {"llm_backend", "ollama_host", "ollama_model", "doubao_api_key",
+                 "doubao_model", "llm_temperature", "llm_num_predict", "llm_timeout"}
+    _TTS_KEYS = {"tts_mode", "tts_voice", "tts_pitch", "tts_device",
+                 "piper_pitch", "edge_timeout"}
+
+    def _apply_runtime(changed):
+        hot = set(changed or [])
+        if chat is not None and (hot & (_LLM_KEYS | {"pet_name", "personality"})):
+            chat.apply_config(rebuild_backend=bool(hot & _LLM_KEYS))
+        if tts is not None and (hot & _TTS_KEYS):
+            tts.apply_config()
+        if asr is not None and "asr_device" in hot:
+            asr.apply_config()
+
     # ASR 一次性识别任务状态
     asr_job = {"running": False, "result": None, "done": False}
+    voice_job = {"running": False, "done": False, "stage": "idle"}
 
     # 检测标注注册表: 每个检测器独立开关 (复选), 视频流只画已开启的框。
     # detect 返回 [(x, y, w, h, score[, text]), ...] 原图坐标,
@@ -690,6 +713,39 @@ def create_app(chat=None, emotion=None, mecanum=None, ptz=None, camera=None,
         n = int(request.args.get("n", 50))
         return jsonify({"logs": log.recent(n)})
 
+    # ========== /api/config ==========
+    @app.route("/api/config", methods=["GET"])
+    def config_get():
+        return jsonify({"ok": True, **runtime_config.snapshot()})
+
+    @app.route("/api/config", methods=["POST"])
+    def config_post():
+        data = request.get_json(silent=True) or {}
+        patch = data.get("patch", data)
+        try:
+            result = runtime_config.update(patch)
+        except Exception as e:
+            return jsonify({"ok": False, "note": str(e)}), 400
+
+        _apply_runtime(result["changed"])
+        if result["changed"]:
+            log.add("sys", f"配置已更新: {', '.join(result['changed'])}")
+        if result["restart"]:
+            log.add("sys", f"需重启生效: {', '.join(result['restart'])}")
+        return jsonify({"ok": not result["errors"], **result,
+                        "groups": runtime_config.GROUPS,
+                        "fields": runtime_config.snapshot()["fields"]})
+
+    @app.route("/api/config/reset", methods=["POST"])
+    def config_reset():
+        try:
+            snap = runtime_config.reset()
+        except Exception as e:
+            return jsonify({"ok": False, "note": str(e)}), 500
+        _apply_runtime([f["key"] for f in snap["fields"]])
+        log.add("sys", "配置已恢复默认值")
+        return jsonify({"ok": True, **snap})
+
     # ========== /api/tts ==========
     @app.route("/api/tts", methods=["POST"])
     def tts_api():
@@ -731,6 +787,61 @@ def create_app(chat=None, emotion=None, mecanum=None, ptz=None, camera=None,
     @app.route("/api/asr/result")
     def asr_result():
         return jsonify(asr_job)
+
+    # ========== /api/voice_test ==========
+    @app.route("/api/voice_test", methods=["POST"])
+    def voice_test():
+        """对话测试: 小强先说一句 → 录音识别 → LLM 回复 → 播报, 全程记录拾音参数"""
+        if asr is None or tts is None:
+            return jsonify({"ok": False, "note": "asr / tts 未连接"}), 503
+        if voice_job["running"]:
+            return jsonify({"ok": False, "note": "上一次测试还没结束"}), 409
+
+        prompt = "我是小强，正在听你说话"
+        voice_job.clear()
+        voice_job.update({"running": True, "done": False, "stage": "speaking",
+                          "prompt": prompt, "text": None, "reply": None,
+                          "peak": None, "threshold": None, "ms": None,
+                          "logprob": None, "error": None})
+
+        def work():
+            try:
+                asr.paused = True          # 暂停后台语音主循环, 别抢麦克风
+                tts.speak(prompt)
+                voice_job["stage"] = "listening"
+                text = asr.listen(timeout=12)
+                voice_job.update({
+                    "text": text,
+                    "peak": asr.last_debug.get("peak"),
+                    "threshold": asr.last_debug.get("threshold"),
+                    "ms": asr.last_debug.get("ms"),
+                    "logprob": asr.last_debug.get("logprob"),
+                })
+                if text and chat:
+                    voice_job["stage"] = "thinking"
+                    resp = chat.chat(text)
+                    voice_job["reply"] = resp.reply
+                    if emotion and resp.emotion:
+                        emotion.set_emotion(resp.emotion)
+                    voice_job["stage"] = "speaking_reply"
+                    tts.speak(resp.reply, resp.emotion)
+                log.add("voice_test",
+                        f"识别: {text or '(没听清)'} | 峰值 {voice_job['peak']} "
+                        f"阈值 {voice_job['threshold']}")
+            except Exception as e:
+                voice_job["error"] = str(e)
+            finally:
+                asr.paused = False
+                voice_job["running"] = False
+                voice_job["stage"] = "done"
+                voice_job["done"] = True
+
+        threading.Thread(target=work, daemon=True).start()
+        return jsonify({"ok": True, "prompt": prompt})
+
+    @app.route("/api/voice_test/result")
+    def voice_test_result():
+        return jsonify(voice_job)
 
     # ========== 中控面板 ==========
     @app.route("/")

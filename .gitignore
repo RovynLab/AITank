@@ -64,5 +64,9 @@ output/
 test_output/
 *.dat
 
+# 中控面板保存的本地配置 (含 API Key)
+petcar/config_local.json
+data/config_local.json
+
 # 大 tflite 模型 (>20MB 的忽略, 小的保留)
 *.tflite.bak

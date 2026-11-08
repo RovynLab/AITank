@@ -1,0 +1,10 @@
+﻿import paramiko
+c = paramiko.SSHClient(); c.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+c.connect("192.168.0.100", username="pi", password="raspberrypi", timeout=15)
+c.exec_command("pkill -f '[p]etcar.main'")[1].channel.recv_exit_status()
+i,o,e = c.exec_command("sleep 2; pgrep -f '[p]etcar.main' || echo STOPPED", timeout=30)
+print(o.read().decode(errors="replace"))
+i,o,e = c.exec_command("nohup arecord -D plughw:CARD=UACDemoV10,DEV=0 -f S16_LE -r 48000 -c 1 -d 60 /home/pi/asr_test.wav > /tmp/arec.log 2>&1 &", timeout=20)
+o.channel.recv_exit_status()
+print("recording started")
+c.close()

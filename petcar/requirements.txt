@@ -15,8 +15,9 @@ numpy>=1.24
 # Adafruit-MotorHAT       # 如果不碰本地 deps/ 可以直接 pip 装
 
 # === TTS 语音合成 ===
+edge-tts>=7.0            # 云端童声 (需联网, 默认)
 pyttsx3>=2.90
-# 或用系统 espeak (apt install espeak)
+# 或用系统 espeak (apt install espeak)，作为离线兜底
 
 # === ASR 语音识别 ===
 faster-whisper>=1.0

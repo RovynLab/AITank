@@ -47,8 +47,11 @@ class LLMBackend(ABC):
 class OllamaBackend(LLMBackend):
     """调用本地 Ollama HTTP API"""
 
-    def __init__(self, host: str = config.OLLAMA_HOST,
-                 model: str = config.OLLAMA_MODEL):
+    def __init__(self, host: Optional[str] = None,
+                 model: Optional[str] = None):
+        # 默认值在运行时读取, 面板改完配置重建后端即可生效
+        host = config.OLLAMA_HOST if host is None else host
+        model = config.OLLAMA_MODEL if model is None else model
         self.host = host
         self.model = model
         self._lock = threading.Lock()
@@ -61,13 +64,16 @@ class OllamaBackend(LLMBackend):
             "model": self.model,
             "messages": messages,
             "stream": False,
+            # 树莓派上 0.5B 速度约 7 token/s, 限制长度避免对话超时 (面板可调)
+            "options": {"num_predict": config.LLM_NUM_PREDICT,
+                        "temperature": config.LLM_TEMPERATURE},
         }
         if tools:
             payload["tools"] = tools
 
         with self._lock:
             try:
-                resp = requests.post(url, json=payload, timeout=60)
+                resp = requests.post(url, json=payload, timeout=config.LLM_TIMEOUT)
                 resp.raise_for_status()
                 data = resp.json()
             except Exception as e:
@@ -101,10 +107,10 @@ class OllamaBackend(LLMBackend):
 class DoubaoBackend(LLMBackend):
     """火山引擎 Doubao API"""
 
-    def __init__(self, api_key: str = config.DOUBAO_API_KEY,
-                 model: str = config.DOUBAO_MODEL):
-        self.api_key = api_key
-        self.model = model
+    def __init__(self, api_key: Optional[str] = None,
+                 model: Optional[str] = None):
+        self.api_key = config.DOUBAO_API_KEY if api_key is None else api_key
+        self.model = config.DOUBAO_MODEL if model is None else model
 
     def chat(self, messages: List[dict], tools: List[dict]) -> dict:
         import requests
@@ -118,12 +124,15 @@ class DoubaoBackend(LLMBackend):
         payload = {
             "model": self.model,
             "messages": messages,
+            "temperature": config.LLM_TEMPERATURE,
+            "max_tokens": config.LLM_NUM_PREDICT,
         }
         if tools:
             payload["tools"] = tools
             payload["tool_choice"] = "auto"
 
-        resp = requests.post(url, headers=headers, json=payload, timeout=30)
+        resp = requests.post(url, headers=headers, json=payload,
+                             timeout=config.LLM_TIMEOUT)
         data = resp.json()
         # 兼容处理
         choices = data.get("choices", [])
@@ -155,7 +164,7 @@ class MockBackend(LLMBackend):
     # 重要: 规则按优先级排序，越具体越靠前！
     RULES: List[Tuple[str, Tuple]] = [
         # ========== 打招呼 ==========
-        (r"(你好|hi|hello|在吗|哈喽)", ("你好呀~我是小宝，很开心认识你！", "happy")),
+        (r"(你好|hi|hello|在吗|哈喽)", ("你好呀~我是{pet_name}，很开心认识你！", "happy")),
         (r"再见|拜拜|晚安", ("好的拜拜~下次再聊哦", "neutral")),
         (r"早安|早上好", ("早上好呀！今天想做点什么？", "happy")),
 
@@ -196,7 +205,7 @@ class MockBackend(LLMBackend):
         (r"(闹钟|提醒|倒计时).*?(\d+)\s*(秒|分钟)", ("好的，我记住啦！", "happy")),
 
         # ========== 情感/人格 (通用，放最后) ==========
-        (r"你是谁|你叫什么|介绍自己", ("我叫小宝，是一只 AI 宠物小车~", "happy")),
+        (r"你是谁|你叫什么|介绍自己", ("我叫{pet_name}，是你的编程小伙伴~", "happy")),
         (r"(心情|开心|难过|怎么样)", ("我现在心情还不错，你呢？", "happy")),
         (r"(生气|讨厌|烦)", ("呜...我好难过，别生气好不好", "sad")),
         (r"(谢谢|感谢|棒)", ("嘿嘿~谢谢你呀！", "love")),
@@ -237,7 +246,7 @@ class MockBackend(LLMBackend):
             # 工具调用时 content 给一个引导语
             content = f"好的，我来 {tool_name}..."
         else:
-            content = action[0] or ""
+            content = (action[0] or "").format(pet_name=config.PET_NAME)
 
         return {"content": content, "tool_calls": tool_calls}
 
@@ -246,8 +255,9 @@ class MockBackend(LLMBackend):
 # 工厂
 # ============================================================================
 
-def create_llm_backend(backend: str = config.LLM_BACKEND) -> LLMBackend:
+def create_llm_backend(backend: Optional[str] = None) -> LLMBackend:
     """根据配置创建后端，并检测可用性"""
+    backend = config.LLM_BACKEND if backend is None else backend
     if backend == "ollama":
         try:
             backend_ = OllamaBackend()

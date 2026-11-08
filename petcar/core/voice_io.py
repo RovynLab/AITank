@@ -42,6 +42,7 @@ class VoiceIO:
 
         self._running = False
         self._thread: Optional[threading.Thread] = None
+        self._last_spoken = ""
 
     def start(self):
         """后台线程启动"""
@@ -60,11 +61,19 @@ class VoiceIO:
     def _loop(self):
         """阻塞式主循环"""
         print("\n========== PetCar 语音交互 ==========")
-        print("输入文字回车 (MockASR) 或说话, 输入 'quit' 退出")
+        if self.asr.mode == "mock":
+            print("输入文字回车 (MockASR), 输入 'quit' 退出")
+        else:
+            print(f"直接说话即可 (ASR={self.asr.mode}), 输入 'quit' 退出")
         print("======================================\n")
 
         while self._running:
             try:
+                # TTS 还在播 / 面板正在做对话测试时不要收音
+                while self._running and (self.tts.is_speaking()
+                                         or self.asr.paused):
+                    time.sleep(0.2)
+
                 # 1. 思考表情
                 if self.emotion:
                     self.emotion.start_think(duration=3.0)
@@ -82,6 +91,12 @@ class VoiceIO:
                     break
 
                 print(f"\n[你] {text}")
+
+                # 回声保护: 识别结果跟自己刚说的话高度重合就丢掉
+                if self._last_spoken and (text in self._last_spoken
+                                          or text[:6] in self._last_spoken):
+                    print("[VoiceIO] 忽略回声")
+                    continue
 
                 # 3. 调 LLM
                 if self.chat:
@@ -104,6 +119,9 @@ class VoiceIO:
                         self.emotion.start_speak(duration=max(2, len(reply_text) * 0.15))
                     print(f"[{resp.emotion}] {reply_text}")
                     self.tts.speak(reply_text, emotion=resp.emotion)
+                    self._last_spoken = reply_text
+                    # 等扬声器余音消散, 免得下一轮把自己的声音当成用户说话
+                    time.sleep(0.5)
 
             except KeyboardInterrupt:
                 print("\n[VoiceIO] Ctrl+C, 退出")

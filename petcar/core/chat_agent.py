@@ -36,6 +36,45 @@ class ChatResponse:
 class ChatAgent:
     """LLM 对话 + 工具调用"""
 
+    # 0.5B 小模型不会稳定输出 tool_calls, 常见动作指令用本地规则直连技能
+    _LOCAL_RULES = [
+        (r"摇(一)?摇?(摇)?头|摇一摇", "express", {"action": "shake"}, "好的，我摇摇头~"),
+        (r"点(一)?点?头", "express", {"action": "nod"}, "好的，我点点头~"),
+        (r"歪(一)?歪?头", "express", {"action": "tilt"}, "好的，我歪歪头~"),
+        (r"跳舞|跳个舞", "express", {"action": "dance"}, "好呀，我跳个舞~"),
+        (r"抬(一)?抬头|向上看|往上看", "look", {"direction": "up", "delta": 15}, "好的，我抬头看~"),
+        (r"低(一)?低头|向下看|往下看", "look", {"direction": "down", "delta": 15}, "好的，我低头看~"),
+        (r"向左看|往左看|看左边", "look", {"direction": "left", "delta": 15}, "好的，我往左看~"),
+        (r"向右看|往右看|看右边", "look", {"direction": "right", "delta": 15}, "好的，我往右看~"),
+        (r"左转|向左转", "move", {"direction": "turnLeft", "duration": 2}, "好的，我左转~"),
+        (r"右转|向右转", "move", {"direction": "turnRight", "duration": 2}, "好的，我右转~"),
+        (r"转(一)?个?圈|旋转|转一下", "move", {"direction": "spin", "duration": 3}, "好的，我转个圈~"),
+        (r"往前走|前进|向前走|往前走", "move", {"direction": "forward", "duration": 2}, "好的，我往前走~"),
+        (r"后退|往后走|往后退", "move", {"direction": "backward", "duration": 2}, "好的，我后退一点~"),
+        (r"停下|停止|别动", "move", {"direction": "stop"}, "好的，我停下啦"),
+        (r"拍(一)?张?照|拍照|相片", "photo", {}, "咔嚓，拍好啦~"),
+    ]
+
+    _TRAD = str.maketrans({
+        "搖": "摇", "頭": "头", "轉": "转", "後": "后", "動": "动",
+        "個": "个", "張": "张", "點": "点", "圈": "圈", "請": "请",
+    })
+
+    def _match_local_command(self, text: str):
+        """识别动作指令 → 直接执行技能。返回 (name, args, reply) 或 None"""
+        if not text:
+            return None
+        t = text.translate(self._TRAD)
+        for pattern, name, args, reply in self._LOCAL_RULES:
+            if re.search(pattern, t):
+                try:
+                    if self.skills:
+                        self.skills.execute(name, **args)
+                except Exception as e:
+                    print(f"[ChatAgent] {name} 执行失败: {e}")
+                return name, args, reply
+        return None
+
     def __init__(self,
                  backend: Optional[LLMBackend] = None,
                  mood_engine=None,
@@ -55,7 +94,7 @@ class ChatAgent:
     # ========================================================================
     def _build_system_prompt(self):
         tools_prompt = self.skills.list_tools_prompt()
-        self._system_prompt = f"""你是一只名叫 {config.PET_NAME} 的 AI 宠物机器人，住在一台小车上。
+        self._system_prompt = f"""你是一只名叫 {config.PET_NAME} 的编程小伙伴机器人，住在一台小车上。
 性格: {config.PET_PERSONALITY}
 
 ## 回答格式
@@ -73,11 +112,18 @@ class ChatAgent:
 
 ## 示例
 用户: 你好
-回复: <reply>你好呀！我是小宝~</reply><emotion>happy</emotion>
+回复: <reply>你好呀！我是{config.PET_NAME}~</reply><emotion>happy</emotion>
 
 用户: 帮我查天气
 回复: <reply>好的，让我查一下！</reply><emotion>thinking</emotion><tool_call>{{"name": "weather", "args": {{"city": "北京"}}}}</tool_call>
 """
+
+    def apply_config(self, rebuild_backend: bool = True):
+        """面板改完身份 / LLM 配置后重建人格提示词 (可选重建后端)"""
+        if rebuild_backend:
+            self.backend = create_llm_backend()
+        self._build_system_prompt()
+        print(f"[ChatAgent] 配置已应用, backend={type(self.backend).__name__}")
 
     def register_skill(self, skill):
         self.skills.register(skill)
@@ -97,6 +143,15 @@ class ChatAgent:
         with self._lock:
             self._messages.append({"role": "user", "content": user_text})
             self._trim_history()
+
+            # 动作类指令走本地规则, 不依赖小模型的 tool_calls
+            local = self._match_local_command(user_text)
+            if local is not None:
+                name, args, reply = local
+                self._messages.append({"role": "assistant", "content": reply})
+                print(f"[ChatAgent] 本地指令 → {name} {args}")
+                return ChatResponse(reply=reply, emotion="happy",
+                                    tools_called=[name])
 
             all_tool_calls: List[str] = []
             final_content = ""
@@ -220,6 +275,11 @@ class ChatAgent:
                      "thinking", "sleepy", "scared", "confused", "laugh", "wink"}
             if emotion not in valid:
                 emotion = "neutral"
+        if not reply:
+            # 小参数模型常不按格式输出, 兜底: 去掉残留标记再当正文
+            text = re.sub(r"</?[a-zA-Z_]+>", "", content)
+            text = re.sub(r"emotion\s*[:：].*", "", text, flags=re.I | re.S)
+            reply = " ".join(text.split())
         return reply, emotion
 
     # ========================================================================

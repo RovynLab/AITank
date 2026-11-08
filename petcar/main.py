@@ -152,6 +152,10 @@ def _test_all_emotions(modules):
 def main():
     args = _parse_args()
 
+    # 面板保存的运行时配置 (优先于 config.py / 环境变量默认值)
+    from petcar.core.runtime_config import load as load_runtime_config
+    load_runtime_config()
+
     # Mock 模式: 强制不连硬件
     if args.mock:
         os.environ.setdefault("PETCAR_LLM_BACKEND", "mock")
@@ -166,6 +170,8 @@ def main():
     # 欢迎表情
     m["emotion"].set_emotion("happy")
     m["emotion"].text_bubble(f"我是{config.PET_NAME}~", duration=3)
+    # 启动自我介绍（异步播报，不阻塞启动）
+    m["tts"].speak_async(config.STARTUP_GREETING)
     time.sleep(1)
 
     # 测试模式
