@@ -60,6 +60,9 @@ def _draw_eye_circle(draw, cx, cy, r=EYE_RADIUS, outline=1, fill=0):
     """普通圆形眼睛"""
     draw.ellipse([cx - r, cy - r, cx + r, cy + r], outline=outline, fill=fill)
 
+def _draw_eye_small(draw, cx, cy):
+    _draw_eye_circle(draw, cx, cy, r=5)
+
 def _draw_eye_arc(draw, cx, cy, r=EYE_RADIUS):
     """弯月眼 (开心笑) — 用一段 200° 弧度"""
     draw.arc([cx - r, cy - r + 2, cx + r, cy + r + 2], start=200, end=340, fill=1)
@@ -125,12 +128,16 @@ def _draw_mouth_skew(draw, y=MOUTH_Y, width=25):
     draw.line([cx - width // 2, y + 2, cx - 3, y], fill=1)
     draw.line([cx + 3, y, cx + width // 2, y - 1], fill=1)
 
+def _draw_mouth_ponder(draw, y=MOUTH_Y):
+    # 短嘴偏向右侧，与困惑的宽波浪嘴区分。
+    cx = W // 2 + 8
+    draw.line([cx - 5, y + 1, cx + 5, y - 1], fill=1, width=2)
+
 def _draw_mouth_wave(draw, y=MOUTH_Y):
     """波浪嘴 (困惑)"""
     cx = W // 2
-    draw.line([cx - 15, y, cx - 5, y - 2], fill=1)
-    draw.line([cx - 5, y - 2, cx + 5, y + 2], fill=1)
-    draw.line([cx + 5, y + 2, cx + 15, y], fill=1)
+    draw.line([(cx - 16, y), (cx - 8, y - 4), (cx, y + 4),
+               (cx + 8, y - 4), (cx + 16, y)], fill=1, width=2)
 
 
 # ============================================================================
@@ -157,6 +164,12 @@ def _draw_brows(draw, style):
         # 弯眉
         draw.arc([cx_l - 10, cy - 4, cx_l + 10, cy + 6], start=200, end=340, fill=1)
         draw.arc([cx_r - 10, cy - 4, cx_r + 10, cy + 6], start=200, end=340, fill=1)
+    elif style == "thinking":
+        draw.line([cx_l - 8, cy - 1, cx_l + 8, cy - 5], fill=1, width=2)
+        draw.line([cx_r - 6, cy + 3, cx_r + 6, cy + 3], fill=1, width=2)
+    elif style == "confused":
+        draw.line([cx_l - 8, cy - 6, cx_l + 7, cy - 2], fill=1, width=2)
+        draw.line([cx_r - 7, cy + 3, cx_r + 8, cy - 1], fill=1, width=2)
     # flat 不画眉毛
 
 
@@ -174,6 +187,14 @@ def _draw_decor(draw, decors):
             draw.text((108, 2), "z", fill=1)
         elif d == "sweat":
             draw.ellipse([105, 20, 110, 27], fill=1)
+        elif d == "ellipsis":
+            for x in (99, 110, 121):
+                draw.ellipse([x - 1, 7, x + 1, 9], fill=1)
+        elif d == "question_right":
+            # 像素图形问号，不依赖字体；与双眼保持距离。
+            draw.arc([104, 2, 116, 12], start=180, end=450, fill=1, width=2)
+            draw.line([(110, 12), (110, 15)], fill=1, width=2)
+            draw.ellipse([110, 18, 112, 20], fill=1)
         elif d == "question":
             draw.text((W // 2 - 2, 12), "?", fill=1)
 
@@ -213,8 +234,8 @@ EXPRESSIONS = {
         "mouth": "arc_top",    "brows": "happy",   "decor": [],
     },
     "thinking": {
-        "left_eye": "circle",  "right_eye": "circle",
-        "mouth": "skew",       "brows": "flat",    "decor": ["question"],
+        "left_eye": "circle",  "right_eye": "small",
+        "mouth": "ponder",     "brows": "thinking", "decor": ["ellipsis"],
     },
     "wink": {
         "left_eye": "arc",     "right_eye": "line_h",
@@ -229,8 +250,8 @@ EXPRESSIONS = {
         "mouth": "open",       "brows": "surprised","decor": ["sweat"],
     },
     "confused": {
-        "left_eye": "circle",  "right_eye": "question",
-        "mouth": "wave",       "brows": "flat",    "decor": ["question"],
+        "left_eye": "circle",  "right_eye": "circle",
+        "mouth": "wave",       "brows": "confused", "decor": ["question_right"],
     },
 }
 
@@ -240,6 +261,7 @@ ALL_EMOTIONS = list(EXPRESSIONS.keys())
 # 绘图函数路由
 _EYE_FUNCS = {
     "circle":    _draw_eye_circle,
+    "small":     _draw_eye_small,
     "arc":       _draw_eye_arc,
     "big":       _draw_eye_big,
     "heart":     _draw_eye_heart,
@@ -254,6 +276,7 @@ _MOUTH_FUNCS = {
     "open":        _draw_mouth_open,
     "open_big":    _draw_mouth_open_big,
     "skew":        _draw_mouth_skew,
+    "ponder":      _draw_mouth_ponder,
     "wave":        _draw_mouth_wave,
 }
 
@@ -372,11 +395,11 @@ class MockOLEDDriver:
             "surprised": "  ◉      ◉   ",
             "sleepy":    "  ─      ─   ",
             "love":      "  ♥      ♥   ",
-            "thinking":  "  ●      ●   ?",
+            "thinking":  "  O      o   ...",
             "wink":      "  ⌒      ─   ",
             "laugh":     "  ⌒      ⌒  (◡)",
             "scared":    "  ◉      ◉  ○",
-            "confused":  "  ●      ?   ∿",
+            "confused":  "  ●      ●   ∿ ?",
         }
         print(f"[OLED Mock] expression={emotion_name} | {icons.get(emotion_name, '?')}")
 
