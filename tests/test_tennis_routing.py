@@ -21,6 +21,19 @@ class TennisRoutingTests(unittest.TestCase):
         exec(compile(ast.Module(body=[function],type_ignores=[]),'tennis_route','exec'),namespace)
         return namespace['_tennis_with_fallback']
 
+    def test_dashboard_ball_button_uses_dedicated_route(self):
+        tree = ast.parse((ROOT/'petcar/api/flask_app.py').read_text(encoding='utf-8'))
+        registry = next(node for node in ast.walk(tree)
+                        if isinstance(node, ast.Dict) and any(
+                            isinstance(key, ast.Constant) and key.value == 'ball'
+                            for key in node.keys))
+        ball = next(value for key, value in zip(registry.keys, registry.values)
+                    if isinstance(key, ast.Constant) and key.value == 'ball')
+        route = next(value for key, value in zip(ball.keys, ball.values)
+                     if isinstance(key, ast.Constant) and key.value == 'detect')
+        self.assertIsInstance(route, ast.Name)
+        self.assertEqual(route.id, '_tennis_with_fallback')
+
     def test_dedicated_tennis_detection_has_priority(self):
         calls=[]
         detector=self.detector(lambda f:[(1,2,30,30,.9,-1)],lambda f:calls.append(f))

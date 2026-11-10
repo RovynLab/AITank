@@ -165,31 +165,31 @@ def create_app(chat=None, emotion=None, mecanum=None, ptz=None, camera=None,
         # 颜色识别 HSV 配置 (P1 面板可调, P2 颜色追踪复用)
         color_cfg = {"h_min": 25, "h_max": 45, "s_min": 90,
                      "s_max": 255, "v_min": 90, "v_max": 255}
-        # 检测器共享一次推理结果并按帧限频复用缓存框 (TFLite ~150ms, 每 2 帧一次)
-        _dnn_cache = {"m": "uninit", "raw": [], "frame_id": -1, "count": 0}
+        # Keep the frame itself alive: NumPy/Python can recycle id(frame).
+        # A new frame always receives fresh coordinates; annotators sharing
+        # the same frame reuse a single inference. Serialize the TFLite engine.
+        _dnn_cache = {"m": "uninit", "frame": None, "raw": []}
+        _dnn_lock = threading.Lock()
 
         def _dnn_all(frame):
-            c = _dnn_cache
-            if c["m"] == "uninit":
+            with _dnn_lock:
+                c = _dnn_cache
+                if c["m"] == "uninit":
+                    try:
+                        c["m"] = get_detector(log=lambda msg: log.add("sys", msg))
+                    except Exception as e:
+                        c["m"] = None
+                        log.add("sys", f"检测器不可用: {e}")
+                if c["m"] is None:
+                    return []
+                if frame is c["frame"]:
+                    return c["raw"]
                 try:
-                    c["m"] = get_detector(log=lambda msg: log.add("sys", msg))
-                except Exception as e:
-                    c["m"] = None
-                    log.add("sys", f"检测器不可用: {e}")
-            if c["m"] is None:
-                return []
-            fid = id(frame)          # 同一帧多个标注只推理一次
-            if fid == c.get("fid"):
-                return c["raw"]
-            c["fid"] = fid
-            c["count"] += 1
-            if c["count"] - c["frame_id"] >= 2:   # 每 2 帧真跑一次, 其余复用
-                c["frame_id"] = c["count"]
-                try:
-                    c["raw"] = c["m"].detect(frame)
+                    raw = c["m"].detect(frame)
                 except Exception:
-                    c["raw"] = []
-            return c["raw"]
+                    raw = []
+                c["frame"], c["raw"] = frame, raw
+                return raw
 
         def _dnn(classes):
             def fn(frame):
@@ -217,7 +217,7 @@ def create_app(chat=None, emotion=None, mecanum=None, ptz=None, camera=None,
             "ball":   {"label": "网球", "tag": "ball", "color": (0, 255, 255),
                        "enabled": False, "detect": _tennis_with_fallback},
             "tv":     {"label": "屏幕", "tag": "tv", "color": (200, 0, 255),
-                       "enabled": False, "detect": _dnn({62})},
+                       "enabled": False, "detect": _dnn({62, 63, 67})},
             # 传统视觉 (无模型, 秒开)
             "tennis": {"label": "网球·色", "tag": "tennis", "color": (60, 220, 60),
                        "enabled": False, "detect": lambda f: [(x, y, w, h, s) for x, y, w, h, s, _ in detect_tennis_ball(f)]},
@@ -581,8 +581,11 @@ def create_app(chat=None, emotion=None, mecanum=None, ptz=None, camera=None,
                     active = [a for a in annotators.values() if a["enabled"]]
                     if active or track_box:
                         frame = frame.copy()
-                        for a in active:
-                            for det in a["detect"](frame):
+                        # Run all detectors before drawing, so later models
+                        # cannot see boxes painted by earlier annotators.
+                        detected = [(a, list(a["detect"](frame))) for a in active]
+                        for a, boxes in detected:
+                            for det in boxes:
                                 x, y, w, h, score = det[:5]
                                 text = (det[5] if len(det) > 5 and det[5]
                                         else a["tag"])
