@@ -31,6 +31,7 @@ class ChatResponse:
     emotion: str = "neutral"
     tools_called: List[str] = field(default_factory=list)
     raw_llm_content: str = ""
+    reply_spoken: bool = False
 
 
 class ChatAgent:
@@ -38,8 +39,8 @@ class ChatAgent:
 
     # 0.5B 小模型不会稳定输出 tool_calls, 常见动作指令用本地规则直连技能
     _LOCAL_RULES = [
-        (r"摇(一)?摇?(摇)?头|摇一摇", "express", {"action": "shake"}, "好的，我摇摇头~"),
-        (r"点(一)?点?头", "express", {"action": "nod"}, "好的，我点点头~"),
+        (r"摇(一)?摇?(摇)?头|摇一摇", "express", {"action": "shake"}, "好的，我来摇头。"),
+        (r"点(一)?点?头", "express", {"action": "nod"}, "好的，我来点头。"),
         (r"歪(一)?歪?头", "express", {"action": "tilt"}, "好的，我歪歪头~"),
         (r"跳舞|跳个舞", "express", {"action": "dance"}, "好呀，我跳个舞~"),
         (r"抬(一)?抬头|向上看|往上看", "look", {"direction": "up", "delta": 15}, "好的，我抬头看~"),
@@ -52,7 +53,7 @@ class ChatAgent:
         (r"往前走|前进|向前走|往前走", "move", {"direction": "forward", "duration": 2}, "好的，我往前走~"),
         (r"后退|往后走|往后退", "move", {"direction": "backward", "duration": 2}, "好的，我后退一点~"),
         (r"停下|停止|别动", "move", {"direction": "stop"}, "好的，我停下啦"),
-        (r"拍(一)?张?照|拍照|相片", "photo", {}, "咔嚓，拍好啦~"),
+        (r"拍(一)?张?照|拍照|相片", "take_photo", {}, "好的，我来拍照。"),
     ]
 
     _TRAD = str.maketrans({
@@ -61,18 +62,13 @@ class ChatAgent:
     })
 
     def _match_local_command(self, text: str):
-        """识别动作指令 → 直接执行技能。返回 (name, args, reply) 或 None"""
+        """仅识别动作，不执行；由 chat 在播报确认后执行。"""
         if not text:
             return None
         t = text.translate(self._TRAD)
         for pattern, name, args, reply in self._LOCAL_RULES:
             if re.search(pattern, t):
-                try:
-                    if self.skills:
-                        self.skills.execute(name, **args)
-                except Exception as e:
-                    print(f"[ChatAgent] {name} 执行失败: {e}")
-                return name, args, reply
+                return name, dict(args), reply.replace("~", "。")
         return None
 
     def __init__(self,
@@ -87,6 +83,7 @@ class ChatAgent:
         self._messages: List[dict] = []
         self._max_history = 20
         self._lock = threading.Lock()
+        self._action_lock = threading.Lock()
 
         self._build_system_prompt()
         print(f"[ChatAgent] 已初始化, backend={type(self.backend).__name__}")
@@ -131,7 +128,8 @@ class ChatAgent:
         self._build_system_prompt()
 
     # ========================================================================
-    def chat(self, user_text: str, max_tool_rounds: int = 3) -> ChatResponse:
+    def chat(self, user_text: str, max_tool_rounds: int = 3,
+             before_action=None) -> ChatResponse:
         """
         一轮完整对话:
         1. 把用户输入加入 messages
@@ -140,22 +138,41 @@ class ChatAgent:
         4. 最终从回复里提取 <reply> 和 <emotion>
         5. 通知 MoodEngine 更新情感
         """
+        local = self._match_local_command(user_text)
+        if local is not None:
+            name, args, reply = local
+            immediate_stop = name == "move" and args.get("direction") == "stop"
+            spoken = False
+            if immediate_stop:
+                self.skills.execute(name, **args)
+            else:
+                with self._action_lock:
+                    if before_action:
+                        before_action(reply, "happy")
+                        spoken = True
+                    self.skills.execute(name, **args)
+            # An unrelated slow LLM request must not delay a local command.
+            if self._lock.acquire(blocking=False):
+                try:
+                    self._messages.extend([
+                        {"role": "user", "content": user_text},
+                        {"role": "assistant", "content": reply},
+                    ])
+                    self._trim_history()
+                finally:
+                    self._lock.release()
+            print(f"[ChatAgent] 本地指令 → {name} {args}")
+            return ChatResponse(reply=reply, emotion="happy",
+                                tools_called=[name], reply_spoken=spoken)
+
         with self._lock:
             self._messages.append({"role": "user", "content": user_text})
             self._trim_history()
 
-            # 动作类指令走本地规则, 不依赖小模型的 tool_calls
-            local = self._match_local_command(user_text)
-            if local is not None:
-                name, args, reply = local
-                self._messages.append({"role": "assistant", "content": reply})
-                print(f"[ChatAgent] 本地指令 → {name} {args}")
-                return ChatResponse(reply=reply, emotion="happy",
-                                    tools_called=[name])
-
             all_tool_calls: List[str] = []
             final_content = ""
             executed_tool_signatures: set = set()  # (name, json_args) → 检测重复
+            spoken_replies = []
 
             for round_i in range(max_tool_rounds):
                 # 组装 messages: system + history
@@ -216,6 +233,21 @@ class ChatAgent:
                         print(f"[ChatAgent] 调用工具: {name}({args})")
                         all_tool_calls.append(name)
 
+                        if (before_action and name in {
+                                "express", "look", "move", "take_photo",
+                                "track_face", "show_emotion"}
+                                and not (name == "move" and args.get("direction") == "stop")):
+                            acknowledgements = {
+                                "express": "好的，我来做这个动作。",
+                                "look": "好的，我来转动云台。",
+                                "move": "好的，我来移动。",
+                                "take_photo": "好的，我来拍照。",
+                                "track_face": "好的，我来追踪人脸。",
+                                "show_emotion": "好的，我来换个表情。",
+                            }
+                            acknowledgement = acknowledgements[name]
+                            before_action(acknowledgement, "happy")
+                            spoken_replies.append(acknowledgement)
                         tool_result = self.skills.execute(name, **args)
                         print(f"[ChatAgent]   → {tool_result[:80]}")
 
@@ -243,6 +275,7 @@ class ChatAgent:
             emotion=emotion or "neutral",
             tools_called=all_tool_calls,
             raw_llm_content=final_content,
+            reply_spoken=reply in spoken_replies,
         )
 
     # ========================================================================

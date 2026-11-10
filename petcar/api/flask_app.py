@@ -331,6 +331,12 @@ def create_app(chat=None, emotion=None, mecanum=None, ptz=None, camera=None,
             return jsonify({"emotions": ["neutral", "happy", "sad", "angry",
                                          "surprised", "sleepy", "thinking"]})
 
+    def _speak_before_action(text, mood):
+        if emotion:
+            emotion.set_emotion(mood)
+            emotion.start_speak(duration=max(2, len(text) * 0.15))
+        tts.speak(text, mood)
+
     # ========== /api/chat ==========
     @app.route("/api/chat")
     def chat_api():
@@ -339,13 +345,13 @@ def create_app(chat=None, emotion=None, mecanum=None, ptz=None, camera=None,
         if not text:
             return jsonify({"error": "text 必填"}), 400
         if chat:
-            resp = chat.chat(text)
+            resp = chat.chat(text, before_action=_speak_before_action if tts and speak_flag else None)
             # 同步表情 + 异步 TTS 出声
             if emotion and resp.emotion:
                 emotion.set_emotion(resp.emotion)
-                if resp.reply and speak_flag:
+                if resp.reply and speak_flag and not resp.reply_spoken:
                     emotion.start_speak(duration=max(2, len(resp.reply) * 0.15))
-            if tts and resp.reply and speak_flag:
+            if tts and resp.reply and speak_flag and not resp.reply_spoken:
                 threading.Thread(
                     target=tts.speak,
                     args=(resp.reply, resp.emotion),
@@ -797,13 +803,13 @@ def create_app(chat=None, emotion=None, mecanum=None, ptz=None, camera=None,
     # ========== /api/voice_test ==========
     @app.route("/api/voice_test", methods=["POST"])
     def voice_test():
-        """对话测试: 小强先说一句 → 录音识别 → LLM 回复 → 播报, 全程记录拾音参数"""
+        """对话测试: 机器人先说一句 → 录音识别 → LLM 回复 → 播报, 全程记录拾音参数"""
         if asr is None or tts is None:
             return jsonify({"ok": False, "note": "asr / tts 未连接"}), 503
         if voice_job["running"]:
             return jsonify({"ok": False, "note": "上一次测试还没结束"}), 409
 
-        prompt = "我是小强，正在听你说话"
+        prompt = f"我是{config.PET_NAME}，正在听你说话"
         voice_job.clear()
         voice_job.update({"running": True, "done": False, "stage": "speaking",
                           "prompt": prompt, "text": None, "reply": None,
@@ -826,12 +832,13 @@ def create_app(chat=None, emotion=None, mecanum=None, ptz=None, camera=None,
                 })
                 if text and chat:
                     voice_job["stage"] = "thinking"
-                    resp = chat.chat(text)
+                    resp = chat.chat(text, before_action=_speak_before_action)
                     voice_job["reply"] = resp.reply
                     if emotion and resp.emotion:
                         emotion.set_emotion(resp.emotion)
                     voice_job["stage"] = "speaking_reply"
-                    tts.speak(resp.reply, resp.emotion)
+                    if not resp.reply_spoken:
+                        tts.speak(resp.reply, resp.emotion)
                 log.add("voice_test",
                         f"识别: {text or '(没听清)'} | 峰值 {voice_job['peak']} "
                         f"阈值 {voice_job['threshold']}")
