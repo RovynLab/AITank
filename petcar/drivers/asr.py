@@ -14,6 +14,7 @@ import wave
 import queue
 import tempfile
 import threading
+import re
 from typing import Optional
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
@@ -24,12 +25,45 @@ if _ROOT not in sys.path:
 from petcar import config
 
 
+class _SpeechGate:
+    """RMS gate without a deaf calibration period at the start of a sentence."""
+
+    def __init__(self, threshold_max, speech_ms, silence_ms):
+        self.threshold_max = max(0.002, threshold_max)
+        self.threshold = min(self.threshold_max, 0.003)
+        self.speech_ms = speech_ms
+        self.silence_ms = silence_ms
+        self.speech = self.silence = 0
+        self.started = False
+        self.noise = []
+
+    def feed(self, rms, duration_ms=100):
+        if not self.started:
+            if rms > self.threshold:
+                self.speech += duration_ms
+                if self.speech >= self.speech_ms:
+                    self.started = True
+                    return "start"
+            else:
+                self.speech = 0
+                # Only quiet chunks calibrate the noise floor, never speech.
+                self.noise = (self.noise + [rms])[-30:]
+                self.threshold = min(self.threshold_max,
+                                     max(0.002, sum(self.noise) / len(self.noise) * 1.8))
+            return "waiting"
+        # Lower release threshold preserves quiet syllables within a sentence.
+        self.silence = (0 if rms > self.threshold * 0.65 else
+                        self.silence + duration_ms)
+        return "done" if self.silence >= self.silence_ms else "record"
+
+
 class ASRDriver:
     """语音识别"""
 
     def __init__(self, mode: str = config.ASR_MODE):
         self.mode = mode
         self._model = None
+        self._fast_model = None
         self._input_device = None
         self.last_debug = {}
         self.paused = False
@@ -55,8 +89,17 @@ class ASRDriver:
             print(f"[ASR] 加载 faster-whisper {config.WHISPER_MODEL} ...")
             self._model = WhisperModel(config.WHISPER_MODEL,
                                        device=device,
-                                       compute_type=compute_type)
+                                       compute_type=compute_type,
+                                       cpu_threads=3)
             print("[ASR] whisper 加载成功")
+            if config.WHISPER_MODEL != "tiny":
+                try:
+                    self._fast_model = WhisperModel(
+                        "tiny", device=device, compute_type=compute_type,
+                        cpu_threads=3, local_files_only=True)
+                    print("[ASR] 简短动作指令快速识别已就绪")
+                except Exception as e:
+                    print(f"[ASR] 快速识别不可用，保留主模型: {e}")
         except ImportError:
             print("[ASR] faster-whisper 未安装, 退回 mock")
             self.mode = "mock"
@@ -171,12 +214,11 @@ class ASRDriver:
             recorded = []
 
             if not interactive:
-                # 自动录音: 前 0.5s 采环境噪音定阈值, 听到人声才开始录,
-                # 静音 1.2s 结束 (只留 0.3s 前置缓冲, 避免把整段静音丢给 whisper)
-                speech_ms = silence_ms = 0
-                baseline = []
+                # 从第一块音频开始检测，保留 0.8 秒前置音频，避免吞掉开头。
+                gate = _SpeechGate(config.VAD_THRESHOLD_MAX,
+                                   config.VAD_SPEECH_MS, config.VAD_SILENCE_MS)
                 preroll = []
-                threshold = 0.012
+                threshold = gate.threshold
                 started = False
                 peak = 0.0
                 start = time.time()
@@ -199,30 +241,22 @@ class ASRDriver:
                         rms = float(np.sqrt(np.mean(
                             (data.astype(np.float32) / 32768.0) ** 2)))
                         peak = max(peak, rms)
-                        if len(baseline) < 5:
-                            baseline.append(rms)
-                            threshold = min(config.VAD_THRESHOLD_MAX,
-                                            max(0.005,
-                                                sum(baseline) / len(baseline) * 1.8))
-                            continue
+                        state = gate.feed(rms)
+                        threshold = gate.threshold
                         if not started:
                             preroll.append(data.copy())
-                            if len(preroll) > 3:
+                            if len(preroll) > 8:
                                 preroll.pop(0)
-                            speech_ms = speech_ms + 100 if rms > threshold else 0
-                            if speech_ms >= config.VAD_SPEECH_MS:
+                            if state == "start":
                                 started = True
                                 recorded.extend(preroll)
                                 preroll = []
-                                speech_ms = config.VAD_SPEECH_MS
                             continue
                         recorded.append(data.copy())
-                        if rms > threshold:
-                            silence_ms = 0
-                        else:
-                            silence_ms += 100
-                        if silence_ms >= config.VAD_SILENCE_MS:
+                        if state == "done":
                             break
+                if self._abort.is_set():
+                    return None
                 if not started:
                     print(f"[ASR] 未检测到人声 (峰值 {peak:.4f} / 阈值 {threshold:.4f})")
                     self.last_debug = {"ms": 0, "peak": round(peak, 4),
@@ -279,10 +313,11 @@ class ASRDriver:
                 wf.writeframes(np.clip(audio * 32768, -32768, 32767)
                                .astype(np.int16).tobytes())
 
-            segments, info = self._model.transcribe(
-                wav_path, language=config.WHISPER_LANG, beam_size=1, vad_filter=True,
-            )
-            segs = list(segments)
+            decode_started = time.monotonic()
+            segs = self._transcribe_audio(wav_path, len(audio) / sample_rate)
+            self.last_debug["decode_ms"] = round((time.monotonic() - decode_started) * 1000)
+            print(f"[ASR] 识别耗时 {self.last_debug['decode_ms']} ms "
+                  f"(通道: {self.last_debug.get('decoder', 'main')})")
             text = "".join(seg.text for seg in segs).strip()
             self.last_debug.update({
                 "text": text,
@@ -307,6 +342,65 @@ class ASRDriver:
         except Exception as e:
             print(f"[ASR] 录音异常: {e}")
             return None
+
+    @staticmethod
+    def _clear_fast_command(segments):
+        if not segments or any(s.avg_logprob < -0.7 or
+                               getattr(s, "no_speech_prob", 1.0) > 0.35
+                               for s in segments):
+            return False
+        text = "".join(s.text for s in segments).strip()
+        text = text.translate(str.maketrans({"搖":"摇", "頭":"头", "點":"点",
+                                            "轉":"转", "請":"请", "後":"后"}))
+        pattern = (
+            r"(?:你好)?(?:小坦)?(?:请你|请|帮我|麻烦你)?"
+            r"(?:摇摇头|摇头|摇一摇头|点点头|点头|点一点头|歪歪头|歪头|"
+            r"跳舞|跳个舞|抬头|低头|向上看|向下看|向左看|向右看|"
+            r"往前走|向前走|前进|后退|往后走|左转|右转|转个圈|停止|停下|拍照)"
+            r"(?:一下|吧|好吗|可以吗)?[。！？!?，,\s]*"
+        )
+        return re.fullmatch(pattern, text) is not None
+
+    def _transcribe_audio(self, path, seconds):
+        options = dict(language=config.WHISPER_LANG, beam_size=1, best_of=1,
+                       vad_filter=True, condition_on_previous_text=False,
+                       without_timestamps=True,
+                       vad_parameters={"threshold":0.35,"min_silence_duration_ms":400,
+                                       "speech_pad_ms":300})
+        if self._fast_model is not None and seconds <= 4.5:
+            try:
+                fast, fast_info = self._fast_model.transcribe(
+                    path, initial_prompt=f"{config.PET_NAME}，请摇摇头。请点点头。向左看。向右看。前进。后退。",
+                    **options)
+                fast = list(fast)
+                clear_command = self._clear_fast_command(fast)
+                if clear_command or self._clear_fast_utterance(fast):
+                    self.last_debug["decoder"] = "fast-command" if clear_command else "fast-short"
+                    return fast
+                if not fast and getattr(fast_info, "duration_after_vad", None) == 0:
+                    self.last_debug["decoder"] = "silence"
+                    return []
+            except Exception as e:
+                print(f"[ASR] 快速识别失败，改用主模型: {e}")
+        segments, _ = self._model.transcribe(
+            path, initial_prompt=f"这是中文对话，机器人的名字叫{config.PET_NAME}。",
+            **options)
+        self.last_debug["decoder"] = "main"
+        return list(segments)
+
+    @staticmethod
+    def _clear_fast_utterance(segments):
+        # Very clear short conversation can also avoid a second decoding pass.
+        if not segments or any(s.avg_logprob < -0.45 or
+                               getattr(s, "no_speech_prob", 1.0) > 0.2
+                               for s in segments):
+            return False
+        text = "".join(s.text for s in segments).strip()
+        if not 2 <= len(text) <= 24 or not re.search(r"[\u4e00-\u9fff]", text):
+            return False
+        if re.search(r"(.{2,6})\1", text) or re.search(r"不要|别|不能|不许", text):
+            return False
+        return True
 
     # ========================================================================
     def listen_loop(self, callback):
