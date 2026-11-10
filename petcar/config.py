@@ -62,13 +62,13 @@ DOUBAO_MODEL   = os.environ.get("PETCAR_DOUBAO_MODEL", "doubao-pro-32k")
 
 # 生成参数 (面板可调)
 LLM_TEMPERATURE = float(os.environ.get("PETCAR_LLM_TEMPERATURE", "0.7"))
-LLM_NUM_PREDICT = int(os.environ.get("PETCAR_LLM_NUM_PREDICT", "150"))
+LLM_NUM_PREDICT = int(os.environ.get("PETCAR_LLM_NUM_PREDICT", "96"))
 LLM_TIMEOUT     = float(os.environ.get("PETCAR_LLM_TIMEOUT", "180"))
 
 # ============================================================================
 # Pet 人格
 # ============================================================================
-PET_NAME = "小强"
+PET_NAME = "小坦"
 PET_PERSONALITY = "活泼友善的编程伙伴，像好朋友一样跟你说话，回答要口语化、简短（30字以内），偶尔用叠词卖萌。"
 
 # 启动时的自我介绍（启动完成后自动播报）
@@ -83,7 +83,7 @@ STARTUP_GREETING = os.environ.get(
 ASR_MODE = os.environ.get("PETCAR_ASR_MODE", "whisper")
 # 选项: "whisper" | "porcupine" | "mock"
 
-WHISPER_MODEL = os.environ.get("PETCAR_WHISPER_MODEL", "small")
+WHISPER_MODEL = os.environ.get("PETCAR_WHISPER_MODEL", "base")
 WHISPER_LANG  = "zh"
 
 # 唤醒词默认带上宠物名字
@@ -93,14 +93,14 @@ WAKE_WORD = os.environ.get("PETCAR_WAKE_WORD", f"你好{PET_NAME}")
 ASR_DEVICE = os.environ.get("PETCAR_ASR_DEVICE", "")
 
 # VAD 灵敏度 (面板可调): 触发阈值上限 / 连续有声起录时长 / 静音结束时长
-VAD_THRESHOLD_MAX = float(os.environ.get("PETCAR_VAD_THRESHOLD_MAX", "0.08"))
-VAD_SPEECH_MS     = int(os.environ.get("PETCAR_VAD_SPEECH_MS", "200"))
-VAD_SILENCE_MS    = int(os.environ.get("PETCAR_VAD_SILENCE_MS", "1200"))
+VAD_THRESHOLD_MAX = float(os.environ.get("PETCAR_VAD_THRESHOLD_MAX", "0.02"))
+VAD_SPEECH_MS     = int(os.environ.get("PETCAR_VAD_SPEECH_MS", "100"))
+VAD_SILENCE_MS    = int(os.environ.get("PETCAR_VAD_SILENCE_MS", "600"))
 
 # ============================================================================
 # TTS 配置
 # ============================================================================
-TTS_MODE = os.environ.get("PETCAR_TTS_MODE", "edge")
+TTS_MODE = os.environ.get("PETCAR_TTS_MODE", "piper")
 # 选项: "edge" (云端童声, 需联网, 失败自动降级 piper) | "piper" (本地离线童声)
 #       | "espeak" | "pyttsx3" | "mock"
 

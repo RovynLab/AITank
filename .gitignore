@@ -70,3 +70,8 @@ data/config_local.json
 
 # 大 tflite 模型 (>20MB 的忽略, 小的保留)
 *.tflite.bak
+
+# 本地安装包和设备运行产物
+*.zst
+petcar/logs/
+petcar/photos/

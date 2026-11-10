@@ -127,7 +127,7 @@ is_running() {
 
 http_code() {
     if command -v curl >/dev/null 2>&1; then
-        curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:${PORT}/" 2>/dev/null || true
+        curl --connect-timeout 1 --max-time 2 -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:${PORT}/" 2>/dev/null || true
     else
         echo "---"
     fi
@@ -170,6 +170,7 @@ do_stop() {
 # ---------- 启动 ----------
 build_env() {
     ENV="PYTHONUNBUFFERED=1"
+    ENV="$ENV HF_HUB_OFFLINE=${HF_HUB_OFFLINE:-1}"
     ENV="$ENV PETCAR_LLM_BACKEND=${PETCAR_LLM_BACKEND:-ollama}"
 
     case "$MODE" in
