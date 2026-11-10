@@ -197,6 +197,15 @@ def create_app(chat=None, emotion=None, mecanum=None, ptz=None, camera=None,
                         _dnn_all(frame) if cid in classes]
             return fn
 
+        _generic_ball = _dnn({32})
+
+        def _tennis_with_fallback(frame):
+            # The tennis option should use the dedicated detector first.
+            balls = detect_tennis_ball(frame)
+            if balls:
+                return [tuple(ball[:5]) for ball in balls]
+            return _generic_ball(frame)
+
         annotators.update({
             # COCO: 0=person 14=bird 15=cat 16=dog 32=sports ball 39=bottle 41=cup 62=tv
             "person": {"label": "人", "tag": "person", "color": (0, 200, 255),
@@ -206,7 +215,7 @@ def create_app(chat=None, emotion=None, mecanum=None, ptz=None, camera=None,
             "cup":    {"label": "水杯", "tag": "cup", "color": (0, 120, 255),
                        "enabled": False, "detect": _dnn({39, 41})},
             "ball":   {"label": "网球", "tag": "ball", "color": (0, 255, 255),
-                       "enabled": False, "detect": _dnn({32})},
+                       "enabled": False, "detect": _tennis_with_fallback},
             "tv":     {"label": "屏幕", "tag": "tv", "color": (200, 0, 255),
                        "enabled": False, "detect": _dnn({62})},
             # 传统视觉 (无模型, 秒开)
