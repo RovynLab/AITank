@@ -15,6 +15,7 @@ class MockBlockService:
     def run(self, program, **kw): return 0
     def stop(self, estop=False): pass
     def poll_status(self): return {"state": "idle", "logs": [], "elapsed": 0, "run_id": 0}
+    def status(self, since=0): return {"state": "idle", "logs": [], "elapsed": 0, "run_id": 0}
     def program_annotator_keys(self): return set()
 
 class MockPidTracker:

@@ -21,7 +21,7 @@ import paramiko
 from scp import SCPClient
 
 # ---------- 连接 ----------
-HOST = "192.168.0.100"
+HOST = "10.1.1.112"
 USER = "pi"
 PASS = "raspberrypi"          # 如果 sudo 密码不同也没关系, pip 和 ollama 都不需要 sudo
 LOCAL_ROOT = r"e:\work\AITank"

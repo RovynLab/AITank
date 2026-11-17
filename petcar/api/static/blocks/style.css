@@ -47,8 +47,17 @@ html, body {
 .conn.off { color: var(--red); border-color: #7f1d1d; background: #2a0b0b; }
 
 /* ---------- Layout ---------- */
-.layout { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) 370px; }
-.workspace { min-width: 0; height: 100%; background: #eef3fb; }
+.layout {
+  flex: 1; min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 494px 340px;
+  transition: grid-template-columns 0.25s ease;
+}
+/* 代码窗隐藏时：workspace 占满，变成两列 */
+.layout.no-code {
+  grid-template-columns: minmax(0, 1fr) 340px;
+}
+.workspace { min-width: 0; height: 100%; background: #eef3fb; overflow: hidden; transition: background 0.25s; }
 .side {
   border-left: 1px solid var(--line); background: var(--panel); padding: 12px;
   display: flex; flex-direction: column; gap: 10px; min-height: 0;
@@ -127,8 +136,9 @@ html, body {
 .blocklyTreeSelected .blocklyTreeLabel { color: #fff; font-weight: 600; }
 
 /* ---------- Responsive ---------- */
-@media (max-width: 1100px) { .layout { grid-template-columns: minmax(0, 1fr) 320px; } }
-@media (max-width: 820px) { .layout { grid-template-columns: 1fr; grid-template-rows: 55% 45%; } .side { border-left: none; border-top: 1px solid var(--line); } }
+@media (max-width: 1400px) { .layout { grid-template-columns: minmax(0, 1fr) 340px 320px; } }
+@media (max-width: 1100px) { .layout { grid-template-columns: minmax(0, 1fr) 320px; } .code-section { display: none; } }
+@media (max-width: 820px) { .layout { grid-template-columns: 1fr; grid-template-rows: 55% 45%; } .side { border-left: none; border-top: 1px solid var(--line); } .code-section { display: none; } }
 
 /* ---------- Modal ---------- */
 .modal-mask {
@@ -190,131 +200,137 @@ html, body {
 .color-chip { font-size: 12px; padding: 3px 10px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); background: #0f1a2c; transition: 0.2s; }
 .color-chip.on { color: #052e16; background: var(--green); border-color: var(--green); font-weight: 700; }
 
-/* ---------- Python Code Panel ---------- */
+/* ---------- Python Code Panel (与积木窗并排，浅色风格) ---------- */
 .code-section {
+  position: relative;
+  height: 100%;
   display: flex; flex-direction: column;
-  border: 1px solid var(--line); border-radius: 10px;
-  background: #0a1222; overflow: hidden;
-  transition: max-height 0.25s ease, opacity 0.2s;
+  border-left: 1px solid #cbd5e1;
+  background: #f7f9fd;   /* 跟积木窗 #eef3fb 协调的浅色 */
+  transition: width 0.25s ease, opacity 0.2s;
+  overflow: hidden;
 }
-.code-section.hidden-code { max-height: 40px; opacity: 0.85; }
-.code-header {
-  display: flex; align-items: center; justify-content: space-between;
-  padding: 8px 12px; background: linear-gradient(180deg, #13213a, #0e1a30);
-  border-bottom: 1px solid var(--line);
+.code-section.hidden-code {
+  display: none;   /* 彻底移除，让 grid 自动重排 */
 }
-.code-title {
-  font-size: 13px; color: var(--accent); font-weight: 700;
-  display: flex; align-items: center; gap: 6px;
+.code-toolbar {
+  position: absolute; top: 6px; right: 8px; z-index: 5;
+  display: flex; gap: 4px;
+  background: rgba(247,249,253,0.85); backdrop-filter: blur(4px);
+  border-radius: 6px; padding: 2px;
 }
-.code-title::before { content: "🐍"; font-size: 14px; }
-.code-actions { display: flex; gap: 4px; }
+.code-toolbar .btn-sm { height: 22px; padding: 0 7px; font-size: 11px; color: #475569; }
+.code-toolbar .btn-sm:hover { background: #e2e8f0; color: #0f172a; }
+
 .code-view {
-  flex: 1; min-height: 100px; max-height: 260px;
-  margin: 0; padding: 10px 12px;
-  overflow: auto; background: #05080f;
+  flex: 1; margin: 0; padding: 14px 10px 14px 0;
+  overflow: auto; background: transparent;
   font-family: Consolas, "JetBrains Mono", "Courier New", monospace;
   font-size: 12.5px; line-height: 1.55;
-  color: #d4d4d4; white-space: pre;
+  color: #1e293b; white-space: pre;
   tab-size: 4; -moz-tab-size: 4;
+  border: none;
 }
-.code-view code { font-family: inherit; color: inherit; }
-/* 语法高亮（纯 CSS） */
-.code-view .kw { color: #c586c0; }       /* keyword */
-.code-view .fn { color: #dcdcaa; }       /* function call */
-.code-view .str { color: #ce9178; }      /* string */
-.code-view .num { color: #b5cea8; }      /* number */
-.code-view .cmt { color: #6a9955; font-style: italic; } /* comment */
-.code-view .type { color: #4ec9b0; }     /* type/builtin */
-.code-view .err { color: #f87171; }      /* error */
-.code-toggle-btn.active {
-  background: rgba(56, 189, 248, 0.15); border-color: var(--accent); color: var(--accent);
+.code-view code {
+  font-family: inherit; color: inherit;
+  display: block; padding-left: 44px;   /* 给行号留位置 */
+  counter-reset: lineno;
+}
+/* 行号 */
+.code-view code > span {
+  display: block; counter-increment: lineno; position: relative;
+}
+.code-view code > span::before {
+  content: counter(lineno);
+  position: absolute; left: -44px; top: 0;
+  width: 36px; text-align: right;
+  color: #94a3b8; font-size: 11px;
+  padding-right: 8px; border-right: 1px solid #e2e8f0;
+  user-select: none; pointer-events: none;
+  font-family: inherit;
 }
 
+/* 浅色语法高亮 */
+.code-view .kw   { color: #8e44ad; font-weight: 600; }   /* keyword - 紫 */
+.code-view .fn   { color: #2563eb; }                    /* function - 蓝 */
+.code-view .str  { color: #c0392b; }                    /* string - 红 */
+.code-view .num  { color: #d35400; }                    /* number - 橙 */
+.code-view .cmt  { color: #7f8c8d; font-style: italic; } /* comment - 灰 */
+.code-view .type { color: #16a085; }                    /* builtin - 青 */
+.code-view .err  { color: #c0392b; background: #fdecea; }
+
 /* ==========================================================================
-   左侧工具面板删除覆盖层（仿编程猫）
+   Toolbox / Flyout 删除叠加层（半透明层 + 开盖/关盖动画垃圾桶）
    ========================================================================== */
 
 .tb-drop-overlay {
-  position: fixed;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  overflow: hidden;
-  pointer-events: none;   /* 不拦截 Blockly 的拖拽事件 */
-  border-radius: 6px;
+  border-radius: 4px;
 }
 
-/* 半透明背景层 */
+/* 半透明背景 */
 .tb-drop-bg {
   position: absolute;
   inset: 0;
   background: linear-gradient(180deg,
-    rgba(239, 68, 68, 0.18) 0%,
-    rgba(239, 68, 68, 0.08) 100%);
-  backdrop-filter: blur(2px);
-  border: 2px dashed rgba(239, 68, 68, 0.6);
-  border-radius: 6px;
-  animation: tb-bg-flash 0.8s ease-in-out infinite alternate;
+    rgba(71, 85, 105, 0.22) 0%,
+    rgba(71, 85, 105, 0.10) 100%);
+  backdrop-filter: blur(1px);
+  border: 2px dashed rgba(100, 116, 139, 0.7);
+  border-radius: 4px;
+  box-sizing: border-box;
+  animation: tb-bg-flash 0.6s ease-in-out infinite alternate;
 }
 
 @keyframes tb-bg-flash {
-  from { border-color: rgba(239, 68, 68, 0.4); background-color: rgba(239, 68, 68, 0.12); }
-  to   { border-color: rgba(239, 68, 68, 0.85); background-color: rgba(239, 68, 68, 0.25); }
+  from { border-color: rgba(100, 116, 139, 0.45); }
+  to   { border-color: rgba(100, 116, 139, 0.95); }
 }
 
 /* 垃圾桶容器 */
 .tb-drop-trash {
   position: relative;
   z-index: 2;
-  transform-origin: center bottom;
-  animation: trash-pop-in 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
+  text-align: center;
+  transform: scale(0.3);
+  opacity: 0;
+  transition: transform 0.22s cubic-bezier(0.34, 1.56, 0.64, 1),
+              opacity 0.18s ease;
 }
 
-@keyframes trash-pop-in {
-  from { transform: scale(0.3); opacity: 0; }
-  to   { transform: scale(1);   opacity: 1; }
+.tb-drop-overlay.is-open .tb-drop-trash {
+  transform: scale(1);
+  opacity: 1;
 }
 
-.tb-drop-trash.is-closing {
-  animation: trash-pop-out 0.2s ease-in forwards;
+.tb-drop-overlay.is-closing .tb-drop-trash {
+  transform: scale(0.5);
+  opacity: 0;
+  transition: transform 0.18s ease-in, opacity 0.14s ease-in;
 }
 
-@keyframes trash-pop-out {
-  from { transform: scale(1);   opacity: 1; }
-  to   { transform: scale(0.4); opacity: 0; }
-}
-
-/* 垃圾桶 SVG 整体发光 */
+/* SVG 发光 */
 .tb-drop-trash svg {
-  filter: drop-shadow(0 6px 18px rgba(239, 68, 68, 0.6));
+  filter: drop-shadow(0 4px 16px rgba(71, 85, 105, 0.7));
 }
 
-/* 盖子默认关闭位置 */
+/* 盖子：默认关 */
 .tb-trash-lid {
-  transform-origin: 60px 30px;   /* 盖子后端作为铰链 */
+  transform-origin: 60px 28px;
   transform: rotate(0deg);
-  transition: transform 0.22s cubic-bezier(0.34, 1.56, 0.64, 1);
+  transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 
-/* 开盖状态 */
-.tb-drop-trash.is-open .tb-trash-lid {
-  transform: rotate(-35deg) translateY(-6px);
+/* 开盖：向后翻 */
+.tb-drop-overlay.is-open .tb-trash-lid {
+  transform: rotate(-38deg) translateY(-8px);
 }
 
-/* 关盖动画 */
-.tb-drop-trash.is-closing .tb-trash-lid {
+/* 关盖 */
+.tb-drop-overlay.is-closing .tb-trash-lid {
   transform: rotate(0deg);
   transition: transform 0.15s ease-in;
-}
-
-/* 标签文字 */
-.tb-drop-label {
-  margin-top: 14px;
-  font-size: 13px;
-  color: #fff;
-  font-weight: 600;
-  text-shadow: 0 1px 4px rgba(0,0,0,0.6);
-  letter-spacing: 1px;
 }

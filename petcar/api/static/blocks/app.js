@@ -59,8 +59,8 @@
     bindButtons();
     bindModal();
 
-    // --- 左侧工具面板拖入删除区 ---
-    setupToolboxDropZone();
+    // --- 给 Toolbox / Flyout 删除区加视觉反馈 ---
+    hookDeleteAreaVisual();
 
     // --- Python 代码实时预览 ---
     try {
@@ -390,118 +390,110 @@
   }
 
   // ==========================================================================
-  // 左侧工具面板拖入删除（仿编程猫）
-  // 不动 Blockly 自带垃圾桶，在左侧工具面板上叠加半透明覆盖层 + 新垃圾桶
+  // 拖入 Toolbox / Flyout 时叠加半透明层 + 垃圾桶开盖/关盖动画
+  // Blockly 原生会自动删除积木（DeleteArea 机制），我们只管视觉
   // ==========================================================================
-  let _dragBlockId = null;      // 当前被拖拽的积木 ID
-  let _dragInToolbox = false;   // 鼠标是否在工具面板区域内
+  function hookDeleteAreaVisual() {
+    // 复用的覆盖层 DOM（只创建一次）
+    let overlay = null;
 
-  function setupToolboxDropZone() {
-    const toolboxDiv = document.querySelector('.blocklyToolboxDiv');
-    if (!toolboxDiv) return;
-
-    // 创建覆盖层 DOM
-    const overlay = document.createElement('div');
-    overlay.className = 'tb-drop-overlay';
-    overlay.innerHTML = `
-      <div class="tb-drop-bg"></div>
-      <div class="tb-drop-trash">
-        <svg viewBox="0 0 120 120" width="120" height="120">
-          <g class="tb-trash-lid">
-            <rect x="30" y="18" width="60" height="12" rx="3" fill="#ef4444"/>
-            <rect x="50" y="10" width="20" height="10" rx="3" fill="#dc2626"/>
-          </g>
-          <g class="tb-trash-body">
-            <path d="M28 32 L34 108 Q36 112 40 112 L80 112 Q84 112 86 108 L92 32 Z" fill="#ef4444"/>
-            <rect x="48" y="48" width="8" height="52" rx="2" fill="#fff" opacity="0.8"/>
-            <rect x="64" y="48" width="8" height="52" rx="2" fill="#fff" opacity="0.8"/>
-          </g>
-        </svg>
-        <div class="tb-drop-label">松开放入积木盒</div>
-      </div>
-    `;
-    overlay.style.display = 'none';
-    document.body.appendChild(overlay);
-
-    const trashSvg  = overlay.querySelector('.tb-drop-trash');
-    const trashLid  = overlay.querySelector('.tb-trash-lid');
-
-    // --- 监听 Blockly 拖拽事件 ---
-    workspace.addChangeListener((event) => {
-      if (event.type === 'drag') {
-        if (event.start) {
-          _dragBlockId = event.blockId || null;
-        } else {
-          // 拖拽结束
-          if (_dragInToolbox && _dragBlockId) {
-            // 先播放关盖动画，再删积木
-            trashSvg.classList.remove('is-open');
-            trashSvg.classList.add('is-closing');
-            setTimeout(() => {
-              try { workspace.deleteBlock(_dragBlockId); } catch (e) { /* ignore */ }
-            }, 180);
-          }
-          _dragBlockId = null;
-          _dragInToolbox = false;
-          hideOverlay();
-        }
-      } else if (event.type === 'move' && _dragBlockId) {
-        requestAnimationFrame(() => updateToolboxZone(toolboxDiv, overlay));
-      }
-    });
-
-    // 全局兜底：mouseup 时清理
-    document.addEventListener('mouseup', () => {
-      if (_dragBlockId) {
-        _dragBlockId = null;
-        _dragInToolbox = false;
-        hideOverlay();
-      }
-    });
-  }
-
-  function updateToolboxZone(toolboxDiv, overlay) {
-    if (!_dragBlockId) { hideOverlay(); return; }
-
-    const rect = toolboxDiv.getBoundingClientRect();
-    const inZone = (_lastMouseX >= rect.left && _lastMouseX <= rect.right &&
-                    _lastMouseY >= rect.top  && _lastMouseY <= rect.bottom);
-
-    if (inZone !== _dragInToolbox) {
-      _dragInToolbox = inZone;
-      if (inZone) showOverlay(overlay, rect);
-      else hideOverlay(overlay);
+    function getOverlay() {
+      // 检查之前创建的还在不在 DOM 里（防止游离）
+      if (overlay && document.body.contains(overlay)) return overlay;
+      overlay = document.createElement('div');
+      overlay.className = 'tb-drop-overlay';
+      overlay.innerHTML = `
+        <div class="tb-drop-bg"></div>
+        <div class="tb-drop-trash">
+          <svg viewBox="0 0 120 130" width="60" height="65">
+            <g class="tb-trash-lid">
+              <rect x="28" y="14" width="64" height="14" rx="3" fill="#475569"/>
+              <rect x="50" y="6"  width="20" height="10" rx="3" fill="#334155"/>
+            </g>
+            <g class="tb-trash-body">
+              <path d="M26 30 L32 112 Q34 118 40 118 L80 118 Q86 118 88 112 L94 30 Z" fill="#475569"/>
+              <rect x="46" y="50" width="8" height="56" rx="2" fill="#fff" opacity="0.7"/>
+              <rect x="66" y="50" width="8" height="56" rx="2" fill="#fff" opacity="0.7"/>
+            </g>
+          </svg>
+        </div>
+      `;
+      overlay.style.display = 'none';
+      overlay.style.pointerEvents = 'none';   // 不能拦截 Blockly 拖拽事件
+      document.body.appendChild(overlay);
+      return overlay;
     }
-  }
 
-  function showOverlay(overlay, rect) {
-    overlay.style.display = 'block';
-    // 定位覆盖层到工具面板上
-    overlay.style.position = 'fixed';
-    overlay.style.left = rect.left + 'px';
-    overlay.style.top  = rect.top  + 'px';
-    overlay.style.width  = rect.width  + 'px';
-    overlay.style.height = rect.height + 'px';
-    overlay.style.zIndex = '9999';
-    // 开盖动画
-    const trashSvg = overlay.querySelector('.tb-drop-trash');
-    trashSvg.classList.remove('is-closing');
-    trashSvg.classList.add('is-open');
-  }
-
-  function hideOverlay(overlay) {
-    if (!overlay) {
-      overlay = document.querySelector('.tb-drop-overlay');
+    function positionOverlay(target) {
+      // Blockly 新版本 getClientRect() 返回 sentinel 值（内部坐标系），
+      // 必须用 DOM 元素的 getBoundingClientRect() 拿屏幕坐标
+      const domSelector =
+        target === workspace.toolbox  ? '.blocklyToolboxDiv' :
+        '.blocklyFlyout, .blocklyFlyoutScrollbar';
+      const domEl = document.querySelector(domSelector);
+      if (!domEl) return false;
+      const rect = domEl.getBoundingClientRect();
+      if (rect.width < 1 || rect.height < 1) return false;  // 隐藏状态
+      const el = getOverlay();
+      el.style.position = 'fixed';
+      el.style.left   = rect.left   + 'px';
+      el.style.top    = rect.top    + 'px';
+      el.style.width  = rect.width  + 'px';
+      el.style.height = rect.height + 'px';
+      el.style.zIndex = '99999';
+      return true;
     }
-    if (overlay) overlay.style.display = 'none';
-  }
 
-  // 全局鼠标位置缓存
-  let _lastMouseX = -1, _lastMouseY = -1;
-  document.addEventListener('mousemove', (e) => {
-    _lastMouseX = e.clientX;
-    _lastMouseY = e.clientY;
-  });
+    function show(target) {
+      const el = getOverlay();
+      if (!positionOverlay(target)) return;
+      el.style.display = 'flex';
+      el.offsetHeight;  // reflow
+      el.classList.remove('is-closing');
+      el.classList.add('is-open');
+    }
+
+    function hide(animated = false) {
+      const el = getOverlay();
+      if (!el || el.style.display === 'none') return;
+      if (animated) {
+        el.classList.remove('is-open');
+        el.classList.add('is-closing');
+        setTimeout(() => { el.style.display = 'none'; el.classList.remove('is-closing'); }, 220);
+      } else {
+        el.style.display = 'none';
+        el.classList.remove('is-open', 'is-closing');
+      }
+    }
+
+    const attachTo = (target) => {
+      if (!target) return;
+      // Blockly 新版本实际调用 onDragEnter / onDragExit（不是 onDragOver！）
+      const origEnter = target.onDragEnter?.bind(target);
+      const origExit  = target.onDragExit?.bind(target);
+      const origDrop  = target.onDrop?.bind(target);
+
+      target.onDragEnter = function (e) {
+        origEnter?.(e);
+        show(target);
+      };
+      target.onDragExit = function (e) {
+        origExit?.(e);
+        hide(false);
+      };
+      target.onDrop = function (e) {
+        origDrop?.(e);
+        hide(true);
+      };
+    };
+
+    attachTo(workspace.toolbox);
+    if (workspace.flyout_) attachTo(workspace.flyout_);
+    if (workspace.flyout && workspace.flyout !== workspace.flyout_) attachTo(workspace.flyout);
+
+    // 全局兜底：mouseup 时一定清理
+    document.addEventListener('mouseup', () => hide(false));
+  }
 
   // ==========================================================================
   // 文件管理 Modal
@@ -672,11 +664,21 @@
   function setCodePanelVisible(visible) {
     codePanelVisible = !!visible;
     const section = $('codeSection');
+    const layout = document.querySelector('.layout');
     const btnTop = $('btn-code-toggle-top');
     const btn = $('btn-code-toggle');
     if (section) section.classList.toggle('hidden-code', !visible);
-    if (btnTop) btnTop.classList.toggle('active', visible);
-    if (btn) btn.textContent = visible ? '▼' : '▶';
+    if (layout)  layout.classList.toggle('no-code', !visible);
+    if (btnTop)  btnTop.classList.toggle('active', visible);
+    if (btn)     btn.textContent = visible ? '▼' : '▶';
+
+    // 等 CSS grid 过渡完成再让 Blockly 重新测量父容器
+    setTimeout(() => {
+      if (typeof Blockly !== 'undefined' && workspace) {
+        try { Blockly.svgResize(workspace); } catch (e) {}
+      }
+      window.dispatchEvent(new Event('resize'));
+    }, 260);   // 与 CSS transition 时长对齐
   }
 
   function copyGeneratedCode() {
@@ -898,7 +900,7 @@
       'and', 'or', 'is', 'None', 'True', 'False', 'async', 'await',
     ];
 
-    // 逐行处理（保留换行）
+    // 逐行处理 + 包成 <span> 让 CSS counter 渲染行号
     const lines = html.split('\n');
     const out = lines.map((raw) => {
       let line = raw;
@@ -910,27 +912,26 @@
         line = line.substring(0, hashIdx);
       }
 
-      // 字符串：先处理，避免字符串里的关键字被染色
-      // 简化处理：匹配 "..." 或 '...' 单行字符串
+      // 字符串
       line = line.replace(/("(?:[^"\\]|\\.)*")|('(?:[^'\\]|\\.)*')/g,
         (m) => '<span class="str">' + m + '</span>');
 
-      // 数字（整数/浮点）
+      // 数字
       line = line.replace(/\b(\d+\.?\d*)\b/g,
         '<span class="num">$1</span>');
 
-      // 关键字（独立单词）
+      // 关键字
       const kwPattern = '\\b(' + KEYWORDS.join('|') + ')\\b';
       line = line.replace(new RegExp(kwPattern, 'g'),
         '<span class="kw">$1</span>');
 
-      // 函数调用：标识符紧跟 (
+      // 函数调用
       line = line.replace(/\b([a-zA-Z_][a-zA-Z0-9_]*)\s*(\()/g,
         '<span class="fn">$1</span>$2');
 
-      return line + tail;
+      return '<span class="ln">' + line + tail + '</span>';
     });
-    return out.join('\n');
+    return out.join('');  // span 是 block，不需要换行符
   }
 
   // ==========================================================================

@@ -32,19 +32,12 @@
   <main class="layout">
     <section id="blocklyDiv" class="workspace"></section>
 
-    <aside class="side">
-      <!-- Python 代码预览 -->
-      <div class="code-section" id="codeSection">
-        <div class="code-header">
-          <span class="code-title">Python 代码（只读）</span>
-          <div class="code-actions">
-            <button id="btn-copy-code" class="btn btn-sm ghost" title="复制代码">📋</button>
-            <button id="btn-code-toggle" class="btn btn-sm ghost" title="隐藏/显示代码窗">▼</button>
-          </div>
-        </div>
-        <pre id="code-view" class="code-view"><code># 正在生成代码...</code></pre>
-      </div>
+    <!-- Python 代码预览（与积木窗并排） -->
+    <section class="code-section" id="codeSection">
+      <pre id="code-view" class="code-view"><code data-line-numbers># 正在生成代码...</code></pre>
+    </section>
 
+    <aside class="side">
       <!-- 视频区域 -->
       <div class="video-section">
         <div class="video-header">
