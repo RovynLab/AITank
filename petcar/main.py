@@ -259,7 +259,7 @@ def _connect_all() -> dict:
     from petcar.blocks.service import BlockService
     block_service = BlockService(BlockRuntime(
         mecanum=mecanum, ptz=ptz, camera=camera, emotion=emotion, tts=tts,
-        pid_tracker=pid_tracker,
+        pid_tracker=pid_tracker, action_player=action_player,
     ))
 
     _set_stage("ready")

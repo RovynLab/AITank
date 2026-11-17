@@ -45,6 +45,38 @@ TARGETS = [
     ("自定义颜色（面板设置）", "color"),
 ]
 
+# 宠物动作（与 petcar/skills/express.py 的 ACTIONS 保持一致）
+ACTIONS = [
+    ("点头", "nod"),
+    ("摇头", "shake"),
+    ("歪头", "tilt"),
+    ("摆尾", "wag"),
+    ("扭腰", "twist"),
+    ("转圈", "spin"),
+    ("蹭蹭", "nuzzle"),
+    ("蹦跳", "hop"),
+    ("委屈低头", "droop"),
+    ("好奇凑近", "lean_in"),
+    ("左顾右盼", "look_around"),
+    ("伸懒腰", "stretch"),
+]
+
+# 手势（与 petcar/drivers/gesture.py 的关键字一致）
+GESTURES = [
+    ("拳头", "fist"),
+    ("一根手指", "one"),
+    ("剪刀手", "peace"),
+    ("三根手指", "three"),
+    ("四根手指", "four"),
+    ("张开手掌", "open"),
+    ("点赞", "thumbs_up"),
+    ("踩", "thumbs_down"),
+    ("OK 手势", "ok"),
+]
+
+# 追踪目标: 人脸 / 网球 / 任一颜色
+# 等待目标: 追踪目标 + 手势
+
 COLORS = [
     ("红色", "red"),
     ("橙色", "orange"),
@@ -56,10 +88,20 @@ COLORS = [
     ("自定义颜色（面板设置）", "custom"),
 ]
 
+TRACK_TARGETS = [
+    ("人脸", "face"),
+    ("网球", "tennis"),
+] + COLORS
+
+WAIT_TARGETS = TRACK_TARGETS + [
+    (f"手势·{label}", f"gesture:{key}") for label, key in GESTURES
+]
+
 CATEGORIES = [
     {"id": "event", "label": "事件", "colour": "#eab308"},
     {"id": "motion", "label": "运动", "colour": "#3b82f6"},
     {"id": "ptz", "label": "云台", "colour": "#06b6d4"},
+    {"id": "action", "label": "动作", "colour": "#8b5cf6"},
     {"id": "face", "label": "表情", "colour": "#a855f7"},
     {"id": "speech", "label": "说话", "colour": "#ec4899"},
     {"id": "sense", "label": "识别", "colour": "#22c55e"},
@@ -160,6 +202,21 @@ BLOCKS = [
             "tooltip": "在 OLED 屏幕上显示表情",
         },
     },
+    # ---------- 宠物动作（复用 ExpressionPlayer）----------
+    {
+        "type": "do_action",
+        "category": "action",
+        "blockly": {
+            "type": "do_action",
+            "message0": "做动作 %1",
+            "args0": [_dd("ACTION", ACTIONS)],
+            "previousStatement": None,
+            "nextStatement": None,
+            "inputsInline": True,
+            "colour": "#8b5cf6",
+            "tooltip": "让小车做一套拟态动作（点头/摆尾/转圈等），做完自动回正",
+        },
+    },
     {
         "type": "say",
         "category": "speech",
@@ -225,6 +282,24 @@ BLOCKS = [
             "tooltip": "看到指定颜色时执行上面一段，否则执行下面一段（否则可留空）",
         },
     },
+    # ---------- 手势识别积木 ----------
+    {
+        "type": "if_gesture",
+        "category": "sense",
+        "blockly": {
+            "type": "if_gesture",
+            "message0": "如果看到手势 %1 那么 %2 否则 %3",
+            "args0": [
+                _dd("GESTURE", GESTURES),
+                {"type": "input_statement", "name": "DO"},
+                {"type": "input_statement", "name": "ELSE"},
+            ],
+            "previousStatement": None,
+            "nextStatement": None,
+            "colour": "#22c55e",
+            "tooltip": "看到指定手势时执行上面一段，否则执行下面一段（否则可留空）",
+        },
+    },
     # ---------- 颜色追踪积木（P1）----------
     {
         "type": "color_track_start",
@@ -252,6 +327,33 @@ BLOCKS = [
             "tooltip": "停止颜色追踪",
         },
     },
+    # ---------- 通用追踪积木（人脸 / 网球 / 颜色）----------
+    {
+        "type": "track_start",
+        "category": "sense",
+        "blockly": {
+            "type": "track_start",
+            "message0": "开始追踪 %1",
+            "args0": [_dd("TARGET", TRACK_TARGETS)],
+            "previousStatement": None,
+            "nextStatement": None,
+            "inputsInline": True,
+            "colour": "#22c55e",
+            "tooltip": "云台自动转动，把目标保持在画面中心",
+        },
+    },
+    {
+        "type": "track_stop",
+        "category": "sense",
+        "blockly": {
+            "type": "track_stop",
+            "message0": "停止追踪",
+            "previousStatement": None,
+            "nextStatement": None,
+            "colour": "#22c55e",
+            "tooltip": "停止云台自动追踪",
+        },
+    },
     # ---------- 控制 ----------
     {
         "type": "wait",
@@ -264,6 +366,23 @@ BLOCKS = [
             "nextStatement": None,
             "colour": "#f97316",
             "tooltip": "等待一段时间",
+        },
+    },
+    {
+        "type": "wait_until",
+        "category": "control",
+        "blockly": {
+            "type": "wait_until",
+            "message0": "等到看到 %1，最多 %2 秒",
+            "args0": [
+                _dd("TARGET", WAIT_TARGETS),
+                _num("TIMEOUT", 5, 0.5, 60, 0.5),
+            ],
+            "previousStatement": None,
+            "nextStatement": None,
+            "inputsInline": True,
+            "colour": "#f97316",
+            "tooltip": "一直等到看见目标再继续；超时后继续执行下一块",
         },
     },
     {

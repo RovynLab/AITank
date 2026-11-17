@@ -71,9 +71,11 @@ class BlockService:
             runner = ProgramRunner(ir, self.runtime, self, self.max_runtime)
             self._runner = runner
 
-        # 按需配置感知（哪些颜色）
+        # 按需配置感知（哪些颜色 / 手势）
         used_colors = ir.get("used_colors") or []
+        used_gestures = ir.get("used_gestures") or []
         self.runtime.set_needed_colors(used_colors)
+        self.runtime.set_needed_gestures(used_gestures)
         self.runtime.start_perception()
         # 颜色追踪仲裁：若中控 PID 在追同一目标，让积木接管
         if self.runtime.pid_tracker_running():
@@ -82,6 +84,11 @@ class BlockService:
         self.log("info", f"开始运行，共 {ir.get('block_count', 0)} 块积木")
         if used_colors:
             self.log("info", f"程序用到颜色: {', '.join(used_colors)}")
+        if used_gestures:
+            from .catalog import GESTURES
+            label_map = {key: label for label, key in GESTURES}
+            names = [label_map.get(k, k) for k in used_gestures]
+            self.log("info", f"程序用到手势: {', '.join(names)}")
         runner.start()
         return {
             "run_id": self._run_id,
@@ -145,15 +152,25 @@ class BlockService:
         if ir is None:
             return keys
         # 遍历所有 op
+        def _mark_target(target: str):
+            if target == "face":
+                keys.add("face")
+            elif target == "tennis":
+                keys.add("tennis")
+            elif target.startswith("gesture:"):
+                keys.add("gesture")
+            else:
+                keys.add("color")
+
         def _walk(nodes):
             for n in nodes or []:
                 op = n.get("op")
-                if op == "if_sees" and n.get("target") == "face":
-                    keys.add("face")
-                elif op == "if_sees" and n.get("target") == "tennis":
-                    keys.add("tennis")
+                if op in ("if_sees", "track_start", "wait_until"):
+                    _mark_target(n.get("target") or "")
                 elif op in ("if_sees_color", "color_track_start"):
                     keys.add("color")
+                elif op == "if_gesture":
+                    keys.add("gesture")
                 for k in ("body", "else"):
                     _walk(n.get(k))
         for hat in ir.get("hats", []):
@@ -163,6 +180,7 @@ class BlockService:
             "face": "face",       # 旧 if_sees 人脸 → face annotator
             "tennis": "tennis",   # 传统视觉网球
             "color": "color",     # 颜色识别
+            "gesture": "gesture", # 手势识别
         }
         return {_map[k] for k in keys if k in _map}
 
@@ -239,6 +257,17 @@ class ProgramRunner(threading.Thread):
         "green": "绿色", "cyan": "青色", "blue": "蓝色",
         "purple": "紫色", "custom": "自定义颜色",
     }
+    ACTION_CN = {
+        "nod": "点头", "shake": "摇头", "tilt": "歪头", "wag": "摆尾",
+        "twist": "扭腰", "spin": "转圈", "nuzzle": "蹭蹭", "hop": "蹦跳",
+        "droop": "委屈低头", "lean_in": "好奇凑近",
+        "look_around": "左顾右盼", "stretch": "伸懒腰",
+    }
+    GESTURE_CN = {
+        "fist": "拳头", "one": "一根手指", "peace": "剪刀手",
+        "three": "三根手指", "four": "四根手指", "open": "张开手掌",
+        "thumbs_up": "点赞", "thumbs_down": "踩", "ok": "OK 手势",
+    }
 
     def __init__(self, ir: dict, runtime, service: BlockService,
                  max_runtime: float):
@@ -291,6 +320,21 @@ class ProgramRunner(threading.Thread):
             self._check()
             self._exec(node)
 
+    def _target_label(self, target: str) -> str:
+        if target.startswith("gesture:"):
+            key = target.split(":", 1)[1]
+            return "手势·" + self.GESTURE_CN.get(key, key)
+        return self.TARGET_CN.get(target, self.COLOR_CN.get(target, target))
+
+    def _condition_met(self, target: str) -> bool:
+        if target.startswith("gesture:"):
+            return self.runtime.sees_gesture(target.split(":", 1)[1])
+        if target in ("face", "tennis"):
+            return self.runtime.sees(target)
+        if target == "color":
+            return self.runtime.sees("color")
+        return self.runtime.sees_color(target)
+
     # ---------- 单个积木 ----------
     def _exec(self, node: dict):
         op = node.get("op")
@@ -322,6 +366,26 @@ class ProgramRunner(threading.Thread):
             self._sleep(seconds)
             return
 
+        if op == "wait_until":
+            target = node["target"]
+            timeout = float(node.get("timeout", 5))
+            label = self._target_label(target)
+            self.service.log_block(
+                bid, f"等待看到{label}（最多 {timeout:g} 秒）")
+            deadline = time.monotonic() + timeout
+            found = False
+            while time.monotonic() < deadline:
+                self._check()
+                if self._condition_met(target):
+                    found = True
+                    break
+                time.sleep(0.08)
+            if found:
+                self.service.log("info", f"看到了{label}，继续执行")
+            else:
+                self.service.log("warn", f"等待超时：没有看到{label}")
+            return
+
         if op == "look":
             direction = node["dir"]
             degrees = float(node["degrees"])
@@ -340,6 +404,22 @@ class ProgramRunner(threading.Thread):
             self.service.log_block(
                 bid, f"表情: {self.EMOTION_CN.get(name, name)}")
             self.runtime.set_emotion(name)
+            return
+
+        if op == "action":
+            name = node["name"]
+            label = self.ACTION_CN.get(name, name)
+            self.service.log_block(bid, f"动作: {label}")
+            if not self.runtime.play_action(name):
+                self.service.log_block(bid, f"动作 {label} 未执行（动作模块不可用）")
+                return
+            started = time.monotonic()
+            while self.runtime.action_busy():
+                self._check()
+                if time.monotonic() - started > 12:
+                    self.runtime.stop_action()
+                    break
+                time.sleep(0.05)
             return
 
         if op == "say":
@@ -383,6 +463,18 @@ class ProgramRunner(threading.Thread):
                 self._exec_list(node.get("else") or [])
             return
 
+        if op == "if_gesture":
+            gesture = node["gesture"]
+            label = self.GESTURE_CN.get(gesture, gesture)
+            self.service.log_block(bid, f"检查手势：{label}")
+            if self.runtime.sees_gesture(gesture):
+                self.service.log("info", f"看到了手势：{label}")
+                self._exec_list(node.get("body") or [])
+            else:
+                self.service.log("info", f"没有看到手势：{label}")
+                self._exec_list(node.get("else") or [])
+            return
+
         if op == "color_track_start":
             color = node["color"]
             label = self.COLOR_CN.get(color, color)
@@ -399,6 +491,26 @@ class ProgramRunner(threading.Thread):
         if op == "color_track_stop":
             self.runtime.stop_color_track()
             self.service.log_block(bid, "颜色追踪已停止")
+            return
+
+        if op == "track_start":
+            target = node["target"]
+            label = self._target_label(target)
+            if target in ("face", "tennis"):
+                ok = self.runtime.start_track(target)
+            else:
+                ok = self.runtime.start_track("color", color_key=target)
+            if ok:
+                self.service.log_block(bid, f"开始追踪：{label}")
+            else:
+                self.service.log_block(
+                    bid, f"追踪 {label} 启动失败（云台/摄像头未就绪）")
+            self._sleep(0.2)
+            return
+
+        if op == "track_stop":
+            self.runtime.stop_track()
+            self.service.log_block(bid, "追踪已停止")
             return
 
         if op == "repeat":

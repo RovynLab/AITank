@@ -24,12 +24,23 @@ def _color_entry() -> dict:
     }
 
 
+def _gesture_entry() -> dict:
+    return {
+        "name": None,      # 手势 key（fist/peace/...）或 None
+        "text": None,      # 视频叠加用的英文标签
+        "score": 0.0,
+        "visible": False,  # 当前是否看到
+        "ts": 0.0,
+    }
+
+
 class PerceptionCache:
     """3~4Hz 的目标检测缓存"""
 
     INTERVAL = 0.3
     STALE_AFTER = 1.2
     HYSTERESIS_MISS = 2   # 连续多少次未命中才判 "看不到"
+    GESTURE_INTERVAL = 0.6  # 手势单独限频，避免拖慢颜色/人脸
 
     def __init__(self, camera, log=None):
         self.camera = camera
@@ -39,11 +50,20 @@ class PerceptionCache:
             "face": False,
             "tennis": False,
             "colors": {},
+            "gesture": _gesture_entry(),
             "ts": 0.0,
             # 兼容旧前端的冗余字段：等于 colors.custom.visible
             "color": False,
         }
         self._needed_colors: set[str] = set()
+        self._needed_gestures: set[str] = set()
+        self._gesture_detector = None
+        self._gesture_unavailable = False
+        self._last_gesture_at = 0.0
+        self._gesture_miss = 0
+        self._gesture_name = None
+        self._gesture_text = None
+        self._gesture_score = 0.0
         self._running = False
         self._thread = None
         self._last_warn = 0.0
@@ -64,6 +84,12 @@ class PerceptionCache:
         with self._lock:
             return set(self._needed_colors)
 
+    def set_needed_gestures(self, keys: list[str] | set[str] | None):
+        """告诉感知线程当前程序关心哪些手势；为空则不做手势推理"""
+        with self._lock:
+            self._needed_gestures = {k for k in (keys or []) if k}
+        self._last_gesture_at = 0.0
+
     # ---------- 生命周期 ----------
     def start(self):
         if self._running:
@@ -76,9 +102,22 @@ class PerceptionCache:
 
     def stop(self):
         self._running = False
-        if self._thread:
-            self._thread.join(timeout=1.5)
+        th = self._thread
+        if th:
+            th.join(timeout=1.5)
             self._thread = None
+            if th.is_alive():
+                return
+        det = self._gesture_detector
+        if det is not None:
+            try:
+                det.close()
+            except Exception:
+                pass
+            self._gesture_detector = None
+            self._gesture_name = None
+            self._gesture_text = None
+            self._gesture_miss = 2
 
     def abort(self):
         """急停用: 只置位, 不等待采样线程退出"""
@@ -115,6 +154,11 @@ class PerceptionCache:
         with self._lock:
             colors = self._snap.get("colors") or {}
             return colors.get(key, {}).get("box")
+
+    def sees_gesture(self, key: str) -> bool:
+        with self._lock:
+            g = self._snap.get("gesture") or {}
+            return bool(g.get("visible")) and g.get("name") == key
 
     # ---------- 采样 ----------
     def _warn(self, msg: str):
@@ -177,6 +221,10 @@ class PerceptionCache:
                         blob = detect_color_blob(frame, cfg, hsv=hsv)
                         self._apply_color_sample(colors_out, key, blob)
 
+                # 按需手势识别（低频，避免拖慢颜色/人脸）
+                self._sample_gesture(frame)
+                gesture_out = self._gesture_snapshot()
+
                 # 合并旧的 "color" 兼容（用 custom 的结论）
                 custom_vis = colors_out.get("custom", {}).get("visible", False)
 
@@ -186,6 +234,7 @@ class PerceptionCache:
                         "tennis": tennis,
                         "color": custom_vis,
                         "colors": colors_out,
+                        "gesture": gesture_out,
                         "ts": time.time(),
                     }
             except Exception as e:
@@ -194,6 +243,63 @@ class PerceptionCache:
                 continue
 
             time.sleep(self.INTERVAL)
+
+    def _sample_gesture(self, frame):
+        """按需运行手势识别，结果做简单的迟到判定"""
+        needed = getattr(self, "_needed_gestures", set())
+        if not needed or self._gesture_unavailable:
+            return
+        now = time.time()
+        if now - self._last_gesture_at < self.GESTURE_INTERVAL:
+            return
+        self._last_gesture_at = now
+
+        if self._gesture_detector is None:
+            try:
+                from ..drivers.gesture import GESTURE_TEXT, GestureDetector
+                self._text_to_key = {v: k for k, v in GESTURE_TEXT.items()}
+                self._gesture_detector = GestureDetector(
+                    log=lambda msg: self._log("info", msg))
+            except Exception as e:
+                self._gesture_unavailable = True
+                self._warn(f"手势识别不可用: {e}")
+                return
+
+        try:
+            dets = self._gesture_detector.detect(frame) or []
+        except Exception as e:
+            self._gesture_unavailable = True
+            self._warn(f"手势识别失败: {e}")
+            return
+
+        if not dets:
+            self._gesture_miss += 1
+            if self._gesture_miss >= 2:
+                self._gesture_name = None
+                self._gesture_text = None
+                self._gesture_score = 0.0
+            return
+
+        best = max(dets, key=lambda d: d[4])
+        text = best[5] if len(best) > 5 else ""
+        key = self._text_to_key.get(text)
+        if key is None:
+            return
+        self._gesture_miss = 0
+        self._gesture_name = key
+        self._gesture_text = text
+        self._gesture_score = float(best[4])
+
+    def _gesture_snapshot(self) -> dict:
+        entry = _gesture_entry()
+        entry.update({
+            "name": self._gesture_name,
+            "text": self._gesture_text,
+            "score": self._gesture_score,
+            "visible": bool(self._gesture_name and self._gesture_miss <= 1),
+            "ts": self._last_gesture_at,
+        })
+        return entry
 
     def _apply_color_sample(self, out: dict, key: str, blob: dict | None):
         """处理一帧颜色样本，做迟滞更新 out[key]"""

@@ -7,8 +7,9 @@
 
 from __future__ import annotations
 
-from .catalog import (BLOCK_TYPES, EMOTIONS, MOTIONS, PTZ_DIRS, TARGETS,
-                      COLORS)
+from .catalog import (BLOCK_TYPES, ACTIONS, COLORS, EMOTIONS, GESTURES,
+                      MOTIONS, PTZ_DIRS, TARGETS, TRACK_TARGETS,
+                      WAIT_TARGETS)
 
 MAX_BLOCKS = 300
 MAX_DEPTH = 15
@@ -18,6 +19,10 @@ _PTZ_DIRS = {v for _, v in PTZ_DIRS}
 _EMOTIONS = {v for _, v in EMOTIONS}
 _TARGETS = {v for _, v in TARGETS}
 _COLORS = {v for _, v in COLORS}
+_ACTIONS = {v for _, v in ACTIONS}
+_GESTURES = {v for _, v in GESTURES}
+_TRACK_TARGETS = {v for _, v in TRACK_TARGETS}
+_WAIT_TARGETS = {v for _, v in WAIT_TARGETS}
 
 
 class CompileError(Exception):
@@ -87,6 +92,20 @@ def _record_color(ctx: dict, key: str):
     ctx.setdefault("used_colors", set()).add(key)
 
 
+def _record_gesture(ctx: dict, key: str):
+    ctx.setdefault("used_gestures", set()).add(key)
+
+
+def _record_target(ctx: dict, target: str):
+    """按等待/追踪目标记录需要感知的颜色或手势"""
+    if target in _COLORS:
+        _record_color(ctx, target)
+    elif target.startswith("gesture:"):
+        key = target.split(":", 1)[1]
+        if key:
+            _record_gesture(ctx, key)
+
+
 def _compile_block(block: dict, depth: int, counter: dict,
                    ctx: dict) -> dict:
     btype = block.get("type")
@@ -117,6 +136,18 @@ def _compile_block(block: dict, depth: int, counter: dict,
             "seconds": _num(block, "SECONDS", "等待时间", 0, 600),
         }
 
+    if btype == "wait_until":
+        target = _field(block, "TARGET", "等待目标")
+        if target not in _WAIT_TARGETS:
+            _fail(block, f"不支持的等待目标: {target}")
+        _record_target(ctx, target)
+        return {
+            "op": "wait_until",
+            "id": bid,
+            "target": target,
+            "timeout": _num(block, "TIMEOUT", "最长等待", 0.5, 60),
+        }
+
     if btype == "look":
         direction = _field(block, "DIR", "方向")
         if direction not in _PTZ_DIRS:
@@ -133,6 +164,12 @@ def _compile_block(block: dict, depth: int, counter: dict,
         if emotion not in _EMOTIONS:
             _fail(block, f"不支持的表情: {emotion}")
         return {"op": "emotion", "id": bid, "name": emotion}
+
+    if btype == "do_action":
+        action = _field(block, "ACTION", "动作")
+        if action not in _ACTIONS:
+            _fail(block, f"不支持的动作: {action}")
+        return {"op": "action", "id": bid, "name": action}
 
     if btype == "say":
         text = str(_field(block, "TEXT", "说话内容")).strip()
@@ -157,6 +194,20 @@ def _compile_block(block: dict, depth: int, counter: dict,
             "id": bid,
             "target": target,
             "body": _statement_body(block, "DO", depth, counter, ctx),
+        }
+
+    # ---------- 手势识别新积木 ----------
+    if btype == "if_gesture":
+        gesture = _field(block, "GESTURE", "手势")
+        if gesture not in _GESTURES:
+            _fail(block, f"不支持的手势: {gesture}")
+        _record_gesture(ctx, gesture)
+        return {
+            "op": "if_gesture",
+            "id": bid,
+            "gesture": gesture,
+            "body": _statement_body(block, "DO", depth, counter, ctx),
+            "else": _statement_body(block, "ELSE", depth, counter, ctx),
         }
 
     # ---------- 颜色识别新积木 ----------
@@ -187,6 +238,23 @@ def _compile_block(block: dict, depth: int, counter: dict,
     if btype == "color_track_stop":
         return {
             "op": "color_track_stop",
+            "id": bid,
+        }
+
+    if btype == "track_start":
+        target = _field(block, "TARGET", "追踪目标")
+        if target not in _TRACK_TARGETS:
+            _fail(block, f"不支持的追踪目标: {target}")
+        _record_target(ctx, target)
+        return {
+            "op": "track_start",
+            "id": bid,
+            "target": target,
+        }
+
+    if btype == "track_stop":
+        return {
+            "op": "track_stop",
             "id": bid,
         }
 
@@ -242,13 +310,15 @@ def compile_program(workspace: dict) -> dict:
         }])
 
     counter = {"n": 1}
-    ctx = {"used_colors": set()}
+    ctx = {"used_colors": set(), "used_gestures": set()}
     body = _compile_chain(_next_block(starts[0]), 0, counter, ctx)
 
     used_colors = sorted(ctx.get("used_colors") or set())
+    used_gestures = sorted(ctx.get("used_gestures") or set())
     return {
         "version": 1,
         "block_count": counter["n"],
         "used_colors": used_colors,
+        "used_gestures": used_gestures,
         "hats": [{"event": "start", "body": body}],
     }

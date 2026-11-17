@@ -74,8 +74,8 @@
     setRunning(false);
     appendLog({ ts: nowText(), level: 'info', text: '积木编辑器已就绪' });
 
-    // 视频默认关（省 CPU / 让老师自己开）
-    setVideo(false);
+    // 视频默认开
+    setVideo(true);
 
     // 通知后端：积木页进入 → 中控面板自动关自己的视频
     enterBlocksView();
@@ -624,14 +624,6 @@
     $('btn-open').addEventListener('click', () => openModal('open'));
     $('btn-save').addEventListener('click', () => openModal('save'));
 
-    $('btn-export').addEventListener('click', () => {
-      const program = Blockly.serialization.workspaces.save(workspace);
-      const blob = new Blob([JSON.stringify(program, null, 2)], { type: 'application/json' });
-      const a = document.createElement('a');
-      a.href = URL.createObjectURL(blob); a.download = 'petcar-blocks.json'; a.click();
-      URL.revokeObjectURL(a.href);
-    });
-
     $('btn-import').addEventListener('click', () => $('fileInput').click());
     $('fileInput').addEventListener('change', async (e) => {
       const file = e.target.files && e.target.files[0]; e.target.value = '';
@@ -651,10 +643,8 @@
       }
     });
 
-    // --- 代码窗按钮 ---
-    $('btn-code-toggle').addEventListener('click', () => setCodePanelVisible(!codePanelVisible));
+    // --- 代码窗按钮（旧内联工具栏按钮已删除，只保留顶部 🐍 代码 按钮） ---
     $('btn-code-toggle-top').addEventListener('click', () => setCodePanelVisible(!codePanelVisible));
-    $('btn-copy-code').addEventListener('click', copyGeneratedCode);
   }
 
   // ==========================================================================
@@ -831,6 +821,12 @@
       return `petcar.show_emotion("${emo}")\n`;
     };
 
+    // --- do_action (语句) ---
+    FB['do_action'] = function (block) {
+      const action = block.getFieldValue('ACTION');
+      return `petcar.action("${action}")\n`;
+    };
+
     // --- say (语句) ---
     FB['say'] = function (block) {
       const text = block.getFieldValue('TEXT').replace(/"/g, '\\"');
@@ -861,6 +857,18 @@
       return code;
     };
 
+    // --- if_gesture (语句) ---
+    FB['if_gesture'] = function (block) {
+      const gesture = block.getFieldValue('GESTURE');
+      const bodyDo = P.statementToCode(block, 'DO') || '  pass\n';
+      const bodyElse = P.statementToCode(block, 'ELSE');
+      let code = `if petcar.sees_gesture("${gesture}"):\n${bodyDo}`;
+      if (bodyElse) {
+        code += `else:\n${bodyElse}`;
+      }
+      return code;
+    };
+
     // --- color_track_start (语句) ---
     FB['color_track_start'] = function (block) {
       const color = block.getFieldValue('COLOR');
@@ -870,6 +878,24 @@
     // --- color_track_stop (语句) ---
     FB['color_track_stop'] = function () {
       return 'petcar.color_track_stop()\n';
+    };
+
+    // --- track_start (语句) ---
+    FB['track_start'] = function (block) {
+      const target = block.getFieldValue('TARGET');
+      return `petcar.track("${target}")\n`;
+    };
+
+    // --- track_stop (语句) ---
+    FB['track_stop'] = function () {
+      return 'petcar.track_stop()\n';
+    };
+
+    // --- wait_until (语句) ---
+    FB['wait_until'] = function (block) {
+      const target = block.getFieldValue('TARGET');
+      const timeout = block.getFieldValue('TIMEOUT');
+      return `petcar.wait_until("${target}", ${timeout})\n`;
     };
 
     // --- repeat (语句) ---

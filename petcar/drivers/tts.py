@@ -302,8 +302,10 @@ class TTSDriver:
         return self._speaking.is_set()
 
     def speak_async(self, text: str, emotion: str = "neutral"):
-        threading.Thread(target=self.speak, args=(text, emotion),
-                         daemon=True).start()
+        th = threading.Thread(target=self.speak, args=(text, emotion),
+                              daemon=True)
+        th.start()
+        return th
 
     def stop(self):
         """立即打断所有正在播放的语音 —— 停积木程序时调用。

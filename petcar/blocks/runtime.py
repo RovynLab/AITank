@@ -20,7 +20,7 @@ class BlockRuntime:
 
     def __init__(self, mecanum=None, ptz=None, camera=None,
                  emotion=None, tts=None, log=None,
-                 pid_tracker=None):
+                 pid_tracker=None, action_player=None):
         self.mecanum = mecanum
         self.ptz = ptz
         self.camera = camera
@@ -28,6 +28,7 @@ class BlockRuntime:
         self.tts = tts
         self._log = log or (lambda level, msg: None)
         self.pid_tracker = pid_tracker   # 外部注入，保证只有一个实例
+        self.action_player = action_player  # 外部注入，复用技能动作库
 
         self._lock = threading.Lock()
         self._moving = False
@@ -128,21 +129,30 @@ class BlockRuntime:
                 self._log("warn", f"表情设置失败: {e}")
 
     def say(self, text: str) -> float:
-        """说一句话，返回估算的等待秒数"""
+        """说一句话，等语音真正播完再返回（返回值是还需额外等待的秒数）"""
         text = str(text)[:100]
-        duration = max(1.0, min(30.0, 0.18 * len(text)))
+        est = max(1.0, min(30.0, 0.18 * len(text)))
         if self.emotion is not None:
             try:
                 self.emotion.set_emotion("happy")
-                self.emotion.start_speak(duration)
+                self.emotion.start_speak(est)
             except Exception:
                 pass
-        if self.tts is not None:
-            try:
-                self.tts.speak_async(text)
-            except Exception as e:
-                self._log("warn", f"语音播放失败: {e}")
-        return duration
+        if self.tts is None:
+            return est
+        try:
+            worker = self.tts.speak_async(text)
+        except Exception as e:
+            self._log("warn", f"语音播放失败: {e}")
+            return 0.0
+        if worker is None or not hasattr(worker, "join"):
+            # 兼容不返回线程的旧实现：退回按估算时长等待
+            return est
+        # 合成（联网 1~2s）+ 播放的总宽限
+        deadline = time.monotonic() + est + 12.0
+        while worker.is_alive() and time.monotonic() < deadline:
+            worker.join(0.05)
+        return 0.0
 
     def stop_tts(self):
         """立即打断正在播放的 TTS —— 停积木程序时调用"""
@@ -151,6 +161,39 @@ class BlockRuntime:
                 self.tts.stop()
             except Exception as e:
                 self._log("warn", f"打断语音失败: {e}")
+
+    # ========================================================================
+    # 宠物动作
+    # ========================================================================
+    def play_action(self, name: str) -> bool:
+        """播放一套拟态动作；动作会占用云台/底盘，先做仲裁"""
+        if self.action_player is None:
+            self._log("warn", "动作不可用（动作播放器未注入）")
+            return False
+        self.stop_motion()
+        if self.pid_tracker_running():
+            self._log("info", "动作开始，先暂停追踪")
+            self.stop_pid_tracker()
+        try:
+            return bool(self.action_player.play(name))
+        except Exception as e:
+            self._log("warn", f"动作执行失败: {e}")
+            return False
+
+    def action_busy(self) -> bool:
+        if self.action_player is None:
+            return False
+        try:
+            return bool(self.action_player.is_busy())
+        except Exception:
+            return False
+
+    def stop_action(self):
+        if self.action_player is not None:
+            try:
+                self.action_player.stop()
+            except Exception as e:
+                self._log("warn", f"停止动作失败: {e}")
 
     # ========================================================================
     # 拍照 / 识别
@@ -180,6 +223,13 @@ class BlockRuntime:
         """告诉感知线程当前程序用到哪些颜色"""
         self.perception.set_needed_colors(keys)
 
+    def set_needed_gestures(self, keys: list[str] | set[str] | None):
+        """告诉感知线程当前程序用到哪些手势"""
+        self.perception.set_needed_gestures(keys)
+
+    def sees_gesture(self, key: str) -> bool:
+        return self.perception.sees_gesture(key)
+
     # ========================================================================
     # 颜色追踪（P1）
     # ========================================================================
@@ -202,9 +252,15 @@ class BlockRuntime:
 
     def start_color_track(self, color_key: str) -> bool:
         """启动 PID 视觉伺服追踪指定颜色 —— 用面板持久化的 PID 参数"""
+        return self.start_track("color", color_key=color_key)
+
+    def start_track(self, target: str, color_key: str | None = None) -> bool:
+        """启动 PID 视觉伺服追踪: 人脸 / 网球 / 颜色"""
         if self.pid_tracker is None or self.camera is None or self.ptz is None:
-            self._log("warn", "颜色追踪不可用（云台/摄像头未连接）")
+            self._log("warn", "视觉追踪不可用（云台/摄像头未连接）")
             return False
+        if self.action_busy():
+            self.stop_action()
         try:
             # 1) 先恢复面板持久化的 PID 参数 (双保险: 不假设面板之前一定 set 过)
             restored = self.pid_tracker.load_params()
@@ -212,14 +268,15 @@ class BlockRuntime:
                 p = self.pid_tracker.params()
                 self._log("info", "PID 参数已恢复 (kp={:.3f}, 增益={:.1f})".format(
                     p["kp"], p["kp"] * 25))
-            # 2) 设置目标颜色 (不覆盖面板 kp/ki/kd)
-            self.pid_tracker.set_target_color(color_key)
-            self.pid_tracker.set_params(target="color", persist=False)
+            # 2) 设置目标 (不覆盖面板 kp/ki/kd)
+            if target == "color":
+                self.pid_tracker.set_target_color(color_key or "custom")
+            self.pid_tracker.set_params(target=target, persist=False)
             # 3) 启动
             self.pid_tracker.start()
             return True
         except Exception as e:
-            self._log("warn", f"启动颜色追踪失败: {e}")
+            self._log("warn", f"启动视觉追踪失败: {e}")
             return False
 
     def stop_color_track(self):
@@ -228,7 +285,10 @@ class BlockRuntime:
         try:
             self.pid_tracker.stop()
         except Exception as e:
-            self._log("warn", f"停止颜色追踪失败: {e}")
+            self._log("warn", f"停止视觉追踪失败: {e}")
+
+    def stop_track(self):
+        self.stop_color_track()
 
     # ========================================================================
     # 生命周期
@@ -241,6 +301,7 @@ class BlockRuntime:
 
     def release_all(self):
         self.stop_motion()
+        self.stop_action()
         self.stop_perception()
         self.stop_color_track()
         self.stop_tts()
@@ -248,6 +309,7 @@ class BlockRuntime:
     def emergency_stop(self):
         # 先停电机, 采样线程异步退出, 保证急停接口快速返回
         self.stop_motion()
+        self.stop_action()
         self.stop_color_track()
         self.stop_tts()
         self.perception.abort()
