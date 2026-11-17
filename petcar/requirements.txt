@@ -15,7 +15,7 @@ numpy>=1.24
 # Adafruit-MotorHAT       # 如果不碰本地 deps/ 可以直接 pip 装
 
 # === TTS 语音合成 ===
-edge-tts>=7.0            # 云端童声 (需联网, 默认)
+edge-tts>=7.0            # 可选云端童声 (需联网)
 pyttsx3>=2.90
 # 或用系统 espeak (apt install espeak)，作为离线兜底
 
@@ -39,3 +39,5 @@ Flask>=3.0
 # === 其他工具 ===
 requests>=2.31
 schedule>=1.2
+
+# 默认离线 Piper 使用板端已有可执行文件和中文模型；播放依赖 ffmpeg 与 alsa-utils。

@@ -64,7 +64,8 @@ class OllamaBackend(LLMBackend):
             "stream": False,
             # 树莓派上 0.5B 速度约 7 token/s, 限制长度避免对话超时 (面板可调)
             "options": {"num_predict": config.LLM_NUM_PREDICT,
-                        "temperature": config.LLM_TEMPERATURE},
+                        "temperature": config.LLM_TEMPERATURE,
+                        "num_ctx": 2048, "num_batch": 128},
         }
         if tools:
             payload["tools"] = tools

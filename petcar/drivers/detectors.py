@@ -49,6 +49,19 @@ class TFLiteSSD:
             except ImportError:
                 from tensorflow.lite.python.interpreter import Interpreter
         self.labels = [l.strip() for l in open(label_path)] if os.path.exists(label_path) else COCO_CLASSES
+        # SSD uses sparse COCO-90 indices; the API and NanoDet use COCO-80.
+        # Some label maps include a leading background label, which is not
+        # emitted by this SSD model's zero-based class output.
+        if os.path.exists(label_path):
+            labels = list(self.labels)
+            if labels and labels[0].lower() in ("???", "background", "__background__"):
+                labels = labels[1:]
+        else:
+            missing = {11, 25, 28, 29, 44, 65, 67, 68, 70, 82}
+            names = iter(COCO_CLASSES)
+            labels = ["???" if i in missing else next(names) for i in range(90)]
+        self.class_ids = {i: COCO_CLASSES.index(name) for i, name in enumerate(labels)
+                          if name in COCO_CLASSES}
         self.itp = Interpreter(model_path=path)
         self.itp.allocate_tensors()
         ind = self.itp.get_input_details()
@@ -74,7 +87,9 @@ class TFLiteSSD:
             s = float(scores[i])
             if s <= self.conf or s > 1.0:
                 continue
-            cid = int(clss[i])
+            cid = self.class_ids.get(int(clss[i]))
+            if cid is None:
+                continue
             if classes is not None and cid not in classes:
                 continue
             ymin = max(0.0, min(1.0, float(boxes[i][0])))

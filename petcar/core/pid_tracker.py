@@ -41,6 +41,44 @@ class PID:
         return max(-self.out_limit, min(self.out_limit, out))
 
 
+class _ServoAxis:
+    """Hysteresis and bounded corrections in reference-image pixels."""
+
+    def reset(self):
+        self.filtered = None
+        self.active = False
+        self.confirmed = 0
+        self.direction = 0
+
+    def __init__(self):
+        self.reset()
+
+    def update(self, error, gain):
+        if abs(error) <= 12 or gain <= 0:
+            self.reset()
+            return 0.0
+        direction = 1 if error > 0 else -1
+        if direction != self.direction:
+            self.reset()
+            self.direction = direction
+        self.filtered = (error if self.filtered is None else
+                         0.55 * error + 0.45 * self.filtered)
+        if not self.active:
+            if abs(error) < 24:
+                self.confirmed = 0
+                return 0.0
+            self.confirmed += 1
+            if self.confirmed < 2:
+                return 0.0
+            self.active = True
+        # Subtract the stop region instead of applying full error at its edge.
+        correction = max(0.0, abs(self.filtered) - 12) / 10.0 * gain
+        # Move faster far from center, retaining gentle corrections nearby.
+        step_limit = min(4.0, 1.2 + abs(self.filtered) / 60.0)
+        correction = min(step_limit, correction)
+        return direction * correction if correction >= 0.3 else 0.0
+
+
 class PIDTracker:
     """后台线程: 检测目标 → 视觉伺服 → 驱动云台。target: face | color | tennis
 
@@ -58,7 +96,7 @@ class PIDTracker:
     DEADZONE = 12        # 像素死区, 小于此不动 (防抖)
     LOST_TIMEOUT = 3.0   # 丢目标超过此秒数则清平滑状态
     PX_PER_DEG = 10.0    # 640px / 水平FOV约64°
-    MAX_STEP = 10.0      # 单次最大修正角 (度), 防目标重现时猛甩
+    CONTROL_INTERVAL = 0.12
 
     DEFAULT_PARAMS = {"kp": 0.14, "ki": 0.0, "kd": 0.0}
 
@@ -101,6 +139,9 @@ class PIDTracker:
             self.pid_x.set_params(kp, ki, kd)
             self.pid_y.set_params(kp, ki, kd)
             if target in ("face", "color", "tennis"):
+                if target != self.target:
+                    self._axis_x.reset()
+                    self._axis_y.reset()
                 self.target = target
         if persist:
             self.save_params()
@@ -174,6 +215,10 @@ class PIDTracker:
         self.running = True
         self.pid_x.reset()
         self.pid_y.reset()
+        self._axis_x.reset()
+        self._axis_y.reset()
+        self.last_seen = 0.0
+        self.last_box = None
         self._thread = threading.Thread(target=self._loop, daemon=True)
         self._thread.start()
         self._log(f"PID 追踪启动 (目标: {self.target})")
@@ -184,6 +229,7 @@ class PIDTracker:
         if self._thread:
             self._thread.join(timeout=2)
             self._thread = None
+        self.out_x = self.out_y = 0.0
         self._log("PID 追踪停止")
 
     def status(self):
@@ -236,6 +282,7 @@ class PIDTracker:
 
     def _loop(self):
         while self.running:
+            cycle_started = time.monotonic()
             try:
                 if not getattr(self.camera, "is_open", True):
                     time.sleep(0.3)
@@ -248,13 +295,15 @@ class PIDTracker:
                 pos = self._find_target(frame)
                 if pos is None:
                     lost = time.time() - self.last_seen
-                    if lost > self.LOST_TIMEOUT:
-                        self._exs = self._eys = 0.0
+                    # Never reuse filtered errors after losing the target.
+                    with self._lock:
+                        self._axis_x.reset()
+                        self._axis_y.reset()
                     if lost > 0.5:
                         self.last_box = None   # 红框不残留, 避免误导
                     self.err_x = self.err_y = 0.0
                     self.out_x = self.out_y = 0.0
-                    time.sleep(0.06)
+                    time.sleep(self.CONTROL_INTERVAL)
                     continue
                 self.last_seen = time.time()
                 (cx, cy), box = pos
@@ -262,25 +311,20 @@ class PIDTracker:
                 err_x = cx - w / 2.0
                 err_y = cy - h / 2.0
                 self.err_x, self.err_y = err_x, err_y
-                # EMA 平滑, 抗检测框抖动 (也平滑导数噪声)
-                self._exs = 0.5 * err_x + 0.5 * self._exs
-                self._eys = 0.5 * err_y + 0.5 * self._eys
-                # 绝对角度视觉伺服: 每帧直接算出应对准的角度, 不累积增量
-                # kp 滑条 0~0.3 → 增益 0~7.5, 默认 0.14 (增益 3.5)
-                gain = self.pid_x.kp * 25.0
-                out_x = out_y = 0.0
-                if abs(self._exs) >= self.DEADZONE:
-                    out_x = max(-self.MAX_STEP, min(
-                        self.MAX_STEP, self._exs / self.PX_PER_DEG * gain))
+                # Normalize to 640x480 so camera resolution cannot change gain.
+                with self._lock:
+                    gain = max(0.0, min(0.8, self.pid_x.kp * 4.0))
+                    out_x = self._axis_x.update(err_x * 640.0 / w, gain)
+                    out_y = self._axis_y.update(err_y * 480.0 / h, gain)
+                if out_x and self.running:
                     # 目标在右 (err_x>0) → 水平角减小 (look_right 同向)
                     self.ptz.h_rotate(self.ptz.h_cur - out_x)
-                if abs(self._eys) >= self.DEADZONE:
-                    out_y = max(-self.MAX_STEP, min(
-                        self.MAX_STEP, self._eys / self.PX_PER_DEG * gain))
+                if out_y and self.running:
                     # 目标在下 (err_y>0) → 垂直角减小 (向下)
                     self.ptz.v_rotate(self.ptz.v_cur - out_y)
                 self.out_x, self.out_y = out_x, out_y
-                time.sleep(0.06)
+                time.sleep(max(0.0, self.CONTROL_INTERVAL -
+                               (time.monotonic() - cycle_started)))
             except Exception as e:
                 self._log(f"PID 追踪异常: {e}")
                 time.sleep(0.3)

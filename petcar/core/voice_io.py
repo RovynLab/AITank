@@ -119,14 +119,17 @@ class VoiceIO:
                 self.emotion.start_think(duration=60.0)   # 足够覆盖 LLM 最长延迟
                 self.emotion.text_bubble("思考中...", duration=60.0)
 
+                response_started = time.monotonic()
             if self.chat:
-                resp = self.chat.chat(text)
+                    resp = self.chat.chat(text, before_action=self._speak_before_action)
             else:
                 resp = type("Resp", (), {
                     "reply": f"(ChatAgent 未配置) 你说的是「{text}」呀",
                     "emotion": "neutral",
                     "tools_called": [],
                 })()
+                print(f"[Latency] 对话/指令处理耗时 "
+                      f"{time.monotonic() - response_started:.2f}s")
 
             # 4. LLM 返回后, 清掉 "思考中", 切换到对应情绪
             if self.emotion:
@@ -135,14 +138,27 @@ class VoiceIO:
 
             # 5. 播放语音 + 嘴巴动画
             reply_text = resp.reply or ""
-            if reply_text:
+                if reply_text and not getattr(resp, "reply_spoken", False):
                 if self.emotion:
                     self.emotion.start_speak(duration=max(2, len(reply_text) * 0.15))
                 print(f"[{resp.emotion}] {reply_text}")
+                    speech_started = time.monotonic()
                 self.tts.speak(reply_text, emotion=resp.emotion)
+                    print(f"[Latency] 回复播放耗时 {time.monotonic() - speech_started:.2f}s")
                 self._last_spoken = reply_text
                 # 等扬声器余音消散, 免得下一轮把自己的声音当成用户说话
                 # 也避免喇叭回声抬高 VAD baseline
                 time.sleep(1.0)
+                elif reply_text:
+                    self._last_spoken = reply_text
+                    time.sleep(0.5)
 
         self._running = False
+
+    def _speak_before_action(self, text, emotion):
+        if self.emotion:
+            self.emotion.set_emotion(emotion)
+            self.emotion.start_speak(duration=max(2, len(text) * 0.15))
+        started = time.monotonic()
+        self.tts.speak(text, emotion)
+        print(f"[Latency] 动作前播报耗时 {time.monotonic() - started:.2f}s")

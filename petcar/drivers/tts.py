@@ -36,6 +36,7 @@ class TTSDriver:
         self._piper_proc = None
         self._piper_lock = threading.Lock()
         self._speaking = threading.Event()
+        self._speak_lock = threading.Lock()
         self._piper_checked = False
         self._piper_ok = False
         self._piper_rate = 22050
@@ -273,6 +274,9 @@ class TTSDriver:
     # ========================================================================
     def speak(self, text: str, emotion: str = "neutral"):
         """同步播放语音。每个阶段开头检查 _stop_requested —— stop() 能立刻打断"""
+        # Decorative tildes can become unexpected Chinese syllables in Piper.
+        text = re.sub(r"[~～]+", "，", text or "")
+        text = re.sub(r"[,，\s]+$", "", text).strip()
         if not text:
             return
         text = text[:100]

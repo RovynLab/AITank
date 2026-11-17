@@ -205,10 +205,12 @@ class EmotionEngine:
                     face["mouth"] = "arc_top"
 
             elif anim == self.ANIM_THINK:
-                # 眼睛在 circle / circle 基础上加一个水平偏移的视觉效果
+                # 思考提示在眼睛上方闪烁，保留原有双眼。
+                marker = "ellipsis" if self._emotion == "thinking" else "question"
+                decor = [item for item in face.get("decor", []) if item != marker]
                 if self._anim_frame % 4 < 2:
-                    face["left_eye"] = "circle"
-                    face["right_eye"] = "question"
+                    decor.append(marker)
+                face["decor"] = decor
 
             elif anim == self.ANIM_HAPPY_BOUNCE:
                 # 整体上下跳动

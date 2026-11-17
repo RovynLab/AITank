@@ -24,6 +24,7 @@ run_petcar.py — AI-PetCar 一键启动脚本
 from __future__ import annotations
 
 import argparse
+import getpass
 import os
 import subprocess
 import sys
@@ -31,9 +32,9 @@ import time
 
 import paramiko
 
-HOST = os.environ.get("PETCAR_HOST", "192.168.0.100")
+HOST = os.environ.get("PETCAR_HOST", "192.168.137.25")
 USER = os.environ.get("PETCAR_SSH_USER", "pi")
-PASS = os.environ.get("PETCAR_SSH_PASS", "raspberrypi")
+PASS = os.environ.get("PETCAR_SSH_PASS", "")
 
 LOCAL_ROOT = os.path.dirname(os.path.abspath(__file__))
 REMOTE_ROOT = f"/home/{USER}/AITank"
@@ -45,7 +46,7 @@ PROC_PATTERN = "[p]etcar.main"
 def connect() -> paramiko.SSHClient:
     c = paramiko.SSHClient()
     c.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-    c.connect(HOST, username=USER, password=PASS, timeout=15)
+    c.connect(HOST, username=USER, password=PASS or getpass.getpass("树莓派 SSH 密码: "), timeout=15)
     print(f"[OK] SSH → {USER}@{HOST}")
     return c
 
@@ -82,6 +83,7 @@ def start(c, port: int, voice: bool = False,
     sh(c, f"mkdir -p {os.path.dirname(LOG_FILE)}")
     # PYTHONUNBUFFERED: 日志重定向到文件时 print 是块缓冲的, 不实时
     env = "PYTHONUNBUFFERED=1 "
+    env += f"HF_HUB_OFFLINE={os.environ.get('HF_HUB_OFFLINE', '1')} "
     env += f"PETCAR_LLM_BACKEND={os.environ.get('PETCAR_LLM_BACKEND', 'ollama')} "
     if offline:
         # 语音走本地 piper 离线童声, 不依赖外网

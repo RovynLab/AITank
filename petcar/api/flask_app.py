@@ -196,10 +196,14 @@ def create_app(chat=None, emotion=None, mecanum=None, ptz=None, camera=None,
         from ..core import color_cfg as cc
         _motion_state = {}
         _gesture = GestureDetector(log=lambda msg: log.add("sys", msg))
-        # 检测器共享一次推理结果并按帧限频复用缓存框 (TFLite ~150ms, 每 2 帧一次)
-        _dnn_cache = {"m": "uninit", "raw": [], "frame_id": -1, "count": 0}
+        # Keep the frame itself alive: NumPy/Python can recycle id(frame).
+        # A new frame always receives fresh coordinates; annotators sharing
+        # the same frame reuse a single inference. Serialize the TFLite engine.
+        _dnn_cache = {"m": "uninit", "frame": None, "raw": []}
+        _dnn_lock = threading.Lock()
 
         def _dnn_all(frame):
+            with _dnn_lock:
             c = _dnn_cache
             if c["m"] == "uninit":
                 try:
@@ -209,24 +213,29 @@ def create_app(chat=None, emotion=None, mecanum=None, ptz=None, camera=None,
                     log.add("sys", f"检测器不可用: {e}")
             if c["m"] is None:
                 return []
-            fid = id(frame)          # 同一帧多个标注只推理一次
-            if fid == c.get("fid"):
+                if frame is c["frame"]:
                 return c["raw"]
-            c["fid"] = fid
-            c["count"] += 1
-            if c["count"] - c["frame_id"] >= 2:   # 每 2 帧真跑一次, 其余复用
-                c["frame_id"] = c["count"]
                 try:
-                    c["raw"] = c["m"].detect(frame)
+                    raw = c["m"].detect(frame)
                 except Exception:
-                    c["raw"] = []
-            return c["raw"]
+                    raw = []
+                c["frame"], c["raw"] = frame, raw
+                return raw
 
         def _dnn(classes):
             def fn(frame):
                 return [(x, y, w, h, s) for x, y, w, h, s, cid in
                         _dnn_all(frame) if cid in classes]
             return fn
+
+        _generic_ball = _dnn({32})
+
+        def _tennis_with_fallback(frame):
+            # The tennis option should use the dedicated detector first.
+            balls = detect_tennis_ball(frame)
+            if balls:
+                return [tuple(ball[:5]) for ball in balls]
+            return _generic_ball(frame)
 
         annotators.update({
             # COCO: 0=person 14=bird 15=cat 16=dog 32=sports ball 39=bottle 41=cup 62=tv
@@ -237,9 +246,9 @@ def create_app(chat=None, emotion=None, mecanum=None, ptz=None, camera=None,
             "cup":    {"label": "水杯", "tag": "cup", "color": (0, 120, 255),
                        "enabled": False, "detect": _dnn({39, 41})},
             "ball":   {"label": "网球", "tag": "ball", "color": (0, 255, 255),
-                       "enabled": False, "detect": _dnn({32})},
+                       "enabled": False, "detect": _tennis_with_fallback},
             "tv":     {"label": "屏幕", "tag": "tv", "color": (200, 0, 255),
-                       "enabled": False, "detect": _dnn({62})},
+                       "enabled": False, "detect": _dnn({62, 63, 67})},
             # 传统视觉 (无模型, 秒开)
             "tennis": {"label": "网球·色", "tag": "tennis", "color": (60, 220, 60),
                        "enabled": False, "detect": lambda f: [(x, y, w, h, s) for x, y, w, h, s, _ in detect_tennis_ball(f)]},
@@ -432,6 +441,12 @@ def create_app(chat=None, emotion=None, mecanum=None, ptz=None, camera=None,
             return jsonify({"emotions": ["neutral", "happy", "sad", "angry",
                                          "surprised", "sleepy", "thinking"]})
 
+    def _speak_before_action(text, mood):
+        if emotion:
+            emotion.set_emotion(mood)
+            emotion.start_speak(duration=max(2, len(text) * 0.15))
+        tts.speak(text, mood)
+
     # ========== /api/chat ==========
     @app.route("/api/chat")
     def chat_api():
@@ -440,13 +455,13 @@ def create_app(chat=None, emotion=None, mecanum=None, ptz=None, camera=None,
         if not text:
             return jsonify({"error": "text 必填"}), 400
         if chat:
-            resp = chat.chat(text)
+            resp = chat.chat(text, before_action=_speak_before_action if tts and speak_flag else None)
             # 同步表情 + 异步 TTS 出声
             if emotion and resp.emotion:
                 emotion.set_emotion(resp.emotion)
-                if resp.reply and speak_flag:
+                if resp.reply and speak_flag and not resp.reply_spoken:
                     emotion.start_speak(duration=max(2, len(resp.reply) * 0.15))
-            if tts and resp.reply and speak_flag:
+            if tts and resp.reply and speak_flag and not resp.reply_spoken:
                 threading.Thread(
                     target=tts.speak,
                     args=(resp.reply, resp.emotion),
@@ -676,8 +691,11 @@ def create_app(chat=None, emotion=None, mecanum=None, ptz=None, camera=None,
                             active.append(a)
                     if active or track_box:
                         frame = frame.copy()
-                        for a in active:
-                            for det in a["detect"](frame):
+                        # Run all detectors before drawing, so later models
+                        # cannot see boxes painted by earlier annotators.
+                        detected = [(a, list(a["detect"](frame))) for a in active]
+                        for a, boxes in detected:
+                            for det in boxes:
                                 x, y, w, h, score = det[:5]
                                 text = (det[5] if len(det) > 5 and det[5]
                                         else a["tag"])
@@ -907,13 +925,13 @@ def create_app(chat=None, emotion=None, mecanum=None, ptz=None, camera=None,
     # ========== /api/voice_test ==========
     @app.route("/api/voice_test", methods=["POST"])
     def voice_test():
-        """对话测试: 小强先说一句 → 录音识别 → LLM 回复 → 播报, 全程记录拾音参数"""
+        """对话测试: 机器人先说一句 → 录音识别 → LLM 回复 → 播报, 全程记录拾音参数"""
         if asr is None or tts is None:
             return jsonify({"ok": False, "note": "asr / tts 未连接"}), 503
         if voice_job["running"]:
             return jsonify({"ok": False, "note": "上一次测试还没结束"}), 409
 
-        prompt = "我是小强，正在听你说话"
+        prompt = f"我是{config.PET_NAME}，正在听你说话"
         voice_job.clear()
         voice_job.update({"running": True, "done": False, "stage": "speaking",
                           "prompt": prompt, "text": None, "reply": None,
@@ -936,11 +954,12 @@ def create_app(chat=None, emotion=None, mecanum=None, ptz=None, camera=None,
                 })
                 if text and chat:
                     voice_job["stage"] = "thinking"
-                    resp = chat.chat(text)
+                    resp = chat.chat(text, before_action=_speak_before_action)
                     voice_job["reply"] = resp.reply
                     if emotion and resp.emotion:
                         emotion.set_emotion(resp.emotion)
                     voice_job["stage"] = "speaking_reply"
+                    if not resp.reply_spoken:
                     tts.speak(resp.reply, resp.emotion)
                 log.add("voice_test",
                         f"识别: {text or '(没听清)'} | 峰值 {voice_job['peak']} "

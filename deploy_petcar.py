@@ -6,7 +6,7 @@ deploy_petcar.py — 一键部署 AI-PetCar 到树莓派
   1. 推 petcar/ 目录
   2. pip 装依赖 (用户级, 不需要 sudo)
   3. 装 ollama 到 ~/bin (不需要 sudo)
-  4. 拉 qwen2.5:1.5b 模型
+  4. 拉 qwen2.5:0.5b 模型
   5. 冒烟测试
 
 python deploy_petcar.py all
@@ -15,7 +15,7 @@ python deploy_petcar.py deps       # 只装 pip 依赖
 python deploy_petcar.py ollama     # 只装 ollama + 模型
 python deploy_petcar.py test       # 冒烟测试
 """
-import sys, os, time, json
+import sys, os, time, json, getpass
 from pathlib import Path
 import paramiko
 from scp import SCPClient
@@ -31,7 +31,7 @@ REMOTE_ROOT = f"/home/{USER}/AITank"
 def ssh_connect():
     c = paramiko.SSHClient()
     c.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-    c.connect(HOST, username=USER, password=PASS, timeout=15)
+    c.connect(HOST, username=USER, password=PASS or getpass.getpass("树莓派 SSH 密码: "), timeout=15)
     print(f"[OK] SSH → {USER}@{HOST}")
     return c
 
@@ -131,8 +131,8 @@ def step_ollama(c):
     run(c, "curl -s http://localhost:11434/api/tags || echo SERVER_DOWN")
 
     # 拉模型
-    print("\n  拉 qwen2.5:1.5b (1.5GB, 约5分钟)...")
-    run(c, "~/bin/ollama pull qwen2.5:1.5b", timeout=600)
+    print("\n  拉 qwen2.5:0.5b (首次使用需要下载)...")
+    run(c, "~/bin/ollama pull qwen2.5:0.5b", timeout=600)
     run(c, "~/bin/ollama list")
 
 # ---------- 4. 冒烟测试 ----------
@@ -144,7 +144,7 @@ def step_test(c):
     # Test A: Ollama 快速对话
     print("\n  --- Test A: Ollama 直接对话 ---")
     _, out, _ = run(c, """curl -s http://localhost:11434/api/chat -d '{
-  "model": "qwen2.5:1.5b",
+  "model": "qwen2.5:0.5b",
   "stream": false,
   "messages": [{"role": "user", "content": "你好，说两个字就好"}]
 }'""", timeout=60)

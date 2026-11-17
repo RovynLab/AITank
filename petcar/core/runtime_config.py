@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import importlib
 import json
+import math
 import os
 import threading
 
@@ -221,11 +222,15 @@ def _coerce(field: dict, value):
             num = float(value)
         except (TypeError, ValueError):
             raise ValueError("必须是数字")
-        if "min" in field:
-            num = max(field["min"], num)
-        if "max" in field:
-            num = min(field["max"], num)
-        return int(round(num)) if field.get("integer") else num
+        if not math.isfinite(num):
+            raise ValueError("必须是有限数字")
+        if "min" in field and num < field["min"]:
+            raise ValueError("小于允许的最小值")
+        if "max" in field and num > field["max"]:
+            raise ValueError("大于允许的最大值")
+        if field.get("integer") and not num.is_integer():
+            raise ValueError("必须是整数")
+        return int(num) if field.get("integer") else num
     if ftype == "select":
         val = str(value)
         if val not in field.get("options", []):

@@ -1,0 +1,13 @@
+{
+  "pet_name": "小坦",
+  "startup_greeting": "你好，我是小坦，是你的编程伙伴，很高兴见到你！",
+  "llm_backend": "ollama",
+  "tts_mode": "piper",
+  "asr_mode": "whisper",
+  "whisper_model": "base",
+  "vad_threshold_max": 0.02,
+  "vad_speech_ms": 100,
+  "vad_silence_ms": 600,
+  "llm_num_predict": 96,
+  "asr_device": ""
+}
