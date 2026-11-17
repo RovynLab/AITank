@@ -1,0 +1,53 @@
+[Unit]
+Description=AITank Whisper ASR Service (faster-whisper 常驻)
+Documentation=https://github.com/AITank/AITank
+After=network-online.target ollama.service
+Wants=network-online.target
+Requires=ollama.service
+
+# petcar 依赖 whisper 服务，服务启动期间 petcar 会等 health check
+[Service]
+Type=notify
+User=pi
+Group=pi
+
+# 工作目录（仓库根）
+WorkingDirectory=/home/pi/AITank
+
+# 环境变量 —— 国内 HF 镜像加速模型下载
+Environment=PYTHONUNBUFFERED=1
+Environment=WHISPER_MODEL=small
+Environment=WHISPER_DEVICE=cpu
+Environment=WHISPER_COMPUTE=int8
+Environment=WHISPER_LANG=zh
+Environment=WHISPER_PORT=8091
+Environment=HF_ENDPOINT=https://hf-mirror.com
+
+# 启动命令
+# 注意: 先用 which 找 python3, 避免硬编码路径
+ExecStartPre=/bin/bash -c 'command -v python3 >/dev/null || exit 1'
+ExecStart=/usr/bin/python3 -m petcar.services.whisper_service
+# 如果 python3 不在 /usr/bin 下, 也可以:
+# ExecStart=/bin/bash -c 'exec $(command -v python3) -m petcar.services.whisper_service'
+
+# 模型加载要 1~2 分钟, 给够超时
+# Type=simple — 我们不发 READY 通知, systemd 等 uvicorn listen 就行
+Type=simple
+TimeoutStartSec=300
+TimeoutStopSec=15
+
+# 崩溃自动重启
+Restart=on-failure
+RestartSec=5
+
+# 资源限制 —— 2GB 板子别让它爆
+MemoryMax=900M
+CPUQuota=80%
+
+# 日志
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=aitank-whisper
+
+[Install]
+WantedBy=multi-user.target

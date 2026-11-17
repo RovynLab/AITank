@@ -4,7 +4,7 @@ drivers/oled.py — SSD1306 OLED 128×64 驱动
 ==========================================
 
 用 luma.oled + PIL.ImageDraw 动态绘制表情元素。
-如果 OLED 没连（开发机上），自动切换到 MockOLEDDriver，在终端打印预览。
+如果 OLED 没连，初始化会直接报错，提示检查 I2C 接线。
 """
 
 from __future__ import annotations
@@ -29,7 +29,7 @@ from petcar import config
 
 try:
     from luma.core.interface.serial import i2c
-    from luma.oled.device import ssd1306
+    from luma.oled.device import ssd1306, sh1106
     from PIL import Image, ImageDraw, ImageFont
     _HAS_LUMA = True
 except ImportError:
@@ -290,17 +290,17 @@ def _draw_face_on(draw, left_eye, right_eye, mouth, brows, decor):
 
 
 # ============================================================================
-# OLEDDriver (真实 / Mock)
+# OLEDDriver
 # ============================================================================
 
 class OLEDDriver:
-    """真实 SSD1306 OLED 驱动"""
+    """真实 SSD1306 / SH1106 OLED 驱动（自动探测控制器）"""
 
     def __init__(self, address: int = config.OLED_ADDR):
         if not _HAS_LUMA:
             raise RuntimeError("luma.oled 未安装，请 pip install luma.oled Pillow")
         serial = i2c(port=1, address=address)
-        self.device = ssd1306(serial)
+        self.device = self._probe_device(serial)
         self.width = W
         self.height = H
         self._image = Image.new('1', (W, H), 0)
@@ -310,6 +310,23 @@ class OLEDDriver:
         except Exception:
             self._font = None
         self._lock = threading.Lock()
+
+    @staticmethod
+    def _probe_device(serial):
+        """自动探测控制器，SH1106 必须优先（SSD1306 初始化 SH1106 不会报错）"""
+        for name, cls, kw in [
+            ("sh1106_128x64",   sh1106,  {"width": 128, "height": 64}),
+            ("ssd1306_128x64", ssd1306, {"width": 128, "height": 64}),
+            ("sh1106_128x32",   sh1106,  {"width": 128, "height": 32}),
+            ("ssd1306_128x32", ssd1306, {"width": 128, "height": 32}),
+        ]:
+            try:
+                dev = cls(serial, rotate=2, **kw)  # rotate=2 → 180°
+                print(f"[OLED] 探测成功: {name} (rotate=180)")
+                return dev
+            except Exception:
+                continue
+        raise RuntimeError("OLED 探测失败，请检查 I2C 接线")
 
     def clear(self):
         self._draw.rectangle([0, 0, W, H], fill=0)
@@ -344,68 +361,65 @@ class OLEDDriver:
     def save_screenshot(self, path: str):
         self._image.save(path)
 
+    # ==================================================================
+    # Loading 动画（初始化时显示）
+    # ==================================================================
+    def start_loading(self, text: str = "PLEASE WAIT"):
+        """启动后台线程，在 OLED 上显示旋转圆圈 + 文字。返回 self 链式调用。"""
+        self._loading = True
+        self._loading_text = text
+        self._loading_t = 0.0
+        t = threading.Thread(target=self._loading_loop, daemon=True, name="oled-loading")
+        t.start()
+        return self
 
-class MockOLEDDriver:
-    """开发机上用的 Mock —— 把表情用 ASCII 打印到终端"""
+    def stop_loading(self):
+        """停止 loading 动画线程"""
+        self._loading = False
+        time.sleep(0.12)  # 等循环退出
 
-    def __init__(self):
-        self.width = W
-        self.height = H
-        self._current = "neutral"
-        self._lock = threading.Lock()
-        print("[OLED Mock] 已初始化 (终端预览模式)")
-
-    def clear(self):
-        pass
-
-    def present(self):
-        pass
-
-    def show_expression(self, emotion_name: str):
-        self._current = emotion_name
-        # 简单的 ASCII 预览
-        icons = {
-            "neutral":   "  ●      ●   ",
-            "happy":     "  ⌒      ⌒  ",
-            "sad":       "  ●      ●   ",
-            "angry":     "  ●      ●   ",
-            "surprised": "  ◉      ◉   ",
-            "sleepy":    "  ─      ─   ",
-            "love":      "  ♥      ♥   ",
-            "thinking":  "  ●      ●   ?",
-            "wink":      "  ⌒      ─   ",
-            "laugh":     "  ⌒      ⌒  (◡)",
-            "scared":    "  ◉      ◉  ○",
-            "confused":  "  ●      ?   ∿",
-        }
-        print(f"[OLED Mock] expression={emotion_name} | {icons.get(emotion_name, '?')}")
-
-    def show_custom_face(self, face_dict: dict, offset_y: int = 0):
-        print(f"[OLED Mock] custom_face={face_dict}, offset_y={offset_y}")
-
-    def show_text(self, text: str, y: int = TEXT_Y):
-        print(f"[OLED Mock] text @{y}: {text}")
-
-    def save_screenshot(self, path: str):
-        print(f"[OLED Mock] save screenshot -> {path}")
+    def _loading_loop(self):
+        """每帧画旋转圆圈 + 文字"""
+        import math
+        while getattr(self, "_loading", False):
+            with self._lock:
+                self.clear()
+                cx, cy = W // 2, H // 2 - 4
+                r = 16
+                # 画 8 根线条，根据时间旋转，只有 2-3 根亮着
+                phase = int((time.time() * 8) % 8)
+                for i in range(8):
+                    ang = math.radians(i * 45 - 90)
+                    x1 = cx + int(math.cos(ang) * (r - 2))
+                    y1 = cy + int(math.sin(ang) * (r - 2))
+                    x2 = cx + int(math.cos(ang) * r)
+                    y2 = cy + int(math.sin(ang) * r)
+                    # 连续 3 根亮（包括当前 phase）
+                    on = (i - phase) % 8 in (0, 1, 2)
+                    self._draw.line([(x1, y1), (x2, y2)], fill=1 if on else 0)
+                # 中心小点
+                self._draw.point((cx, cy), fill=1)
+                # 顶部文字（8px 小字）
+                try:
+                    f8 = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSansMono-Bold.ttf", 8)
+                except Exception:
+                    f8 = None
+                if f8:
+                    tw = int(f8.getlength(self._loading_text))
+                    self._draw.text(((W - tw) // 2, 0), self._loading_text, fill=1, font=f8)
+                self.present()
+            time.sleep(0.12)
 
 
 # ============================================================================
 # 工厂函数
 # ============================================================================
 
-def create_oled_driver() -> OLEDDriver | MockOLEDDriver:
-    """自动检测硬件是否可用，返回对应驱动"""
-    if _HAS_LUMA:
-        try:
-            drv = OLEDDriver()
-            # 快速自检
-            drv.show_expression("neutral")
-            time.sleep(0.05)
-            return drv
-        except Exception as e:
-            print(f"[OLED] 硬件不可用 ({e}), 切换 Mock")
-            return MockOLEDDriver()
-    else:
-        print("[OLED] luma.oled 未安装, 使用 Mock")
-        return MockOLEDDriver()
+def create_oled_driver() -> OLEDDriver:
+    """创建并自检 OLED 驱动，硬件不可用时直接报错"""
+    if not _HAS_LUMA:
+        raise RuntimeError("luma.oled 未安装，请 pip install luma.oled Pillow")
+    drv = OLEDDriver()
+    drv.show_expression("neutral")
+    time.sleep(0.05)
+    return drv

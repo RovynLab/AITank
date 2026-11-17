@@ -48,44 +48,125 @@ class PIDTracker:
       目标角 = 当前角 - 误差px / PX_PER_DEG * 增益
     每帧直接对准, 不累积增量, 无延迟超调振荡。
     面板 Kp 滑条即增益 (kp*25): 1.0=一步对准, <1 更阻尼, >1 会振荡。
-    默认 kp=0.14 (增益 3.5)。Ki/Kd 不再参与。"""
+    默认 kp=0.14 (增益 3.5)。Ki/Kd 不再参与。
+
+    PID 参数持久化: ~/.aitank/pid_params.json
+      面板调参数 → set_params() 自动保存
+      板重启 → main.py 创建后 load_params() 自动恢复
+      积木 start_color_track → 显式 load_params() 双保险"""
 
     DEADZONE = 12        # 像素死区, 小于此不动 (防抖)
     LOST_TIMEOUT = 3.0   # 丢目标超过此秒数则清平滑状态
     PX_PER_DEG = 10.0    # 640px / 水平FOV约64°
     MAX_STEP = 10.0      # 单次最大修正角 (度), 防目标重现时猛甩
 
-    def __init__(self, camera, ptz, get_color_cfg, log=None):
+    DEFAULT_PARAMS = {"kp": 0.14, "ki": 0.0, "kd": 0.0}
+
+    def __init__(self, camera, ptz, get_color_cfg=None, log=None,
+                 params_path: str | None = None):
         self.camera = camera
         self.ptz = ptz
         self.get_color_cfg = get_color_cfg
         self._log = log or (lambda msg: None)
-        self.pid_x = PID(kp=0.14, ki=0.0, kd=0.0)   # kp 作为伺服增益
+        self.pid_x = PID(kp=0.14, ki=0.0, kd=0.0)
         self.pid_y = PID(kp=0.14, ki=0.0, kd=0.0)
         self.target = "face"
+        self.color_key = "custom"
         self.running = False
         self._thread = None
         self._lock = threading.Lock()
-        self._exs = 0.0     # EMA 平滑后的误差
+        self._exs = 0.0
         self._eys = 0.0
-        # 状态 (供面板实时显示)
         self.err_x = 0.0
         self.err_y = 0.0
         self.out_x = 0.0
         self.out_y = 0.0
         self.last_seen = 0.0
-        self.last_box = None   # 当前锁定的目标框 (x, y, w, h), 视频流画框用
+        self.last_box = None
 
-    def set_params(self, kp=None, ki=None, kd=None, target=None):
+        # 持久化路径
+        self._params_path = params_path or self._default_params_path()
+
+    @staticmethod
+    def _default_params_path() -> str:
+        import os
+        base = os.path.join(os.path.expanduser("~"), ".aitank")
+        os.makedirs(base, exist_ok=True)
+        return os.path.join(base, "pid_params.json")
+
+    def set_params(self, kp=None, ki=None, kd=None, target=None,
+                   persist: bool = True):
+        """设置 PID 参数, 默认持久化到磁盘 (面板/积木都走这里)"""
         with self._lock:
             self.pid_x.set_params(kp, ki, kd)
             self.pid_y.set_params(kp, ki, kd)
             if target in ("face", "color", "tennis"):
                 self.target = target
+        if persist:
+            self.save_params()
+
+    def save_params(self):
+        """把当前 PID 参数写到磁盘"""
+        import json, os, tempfile
+        try:
+            data = {
+                "kp": self.pid_x.kp,
+                "ki": self.pid_x.ki,
+                "kd": self.pid_x.kd,
+                "target": self.target,
+                "color_key": self.color_key,
+            }
+            os.makedirs(os.path.dirname(self._params_path), exist_ok=True)
+            # 原子写
+            fd, tmp = tempfile.mkstemp(dir=os.path.dirname(self._params_path),
+                                       suffix=".pid")
+            try:
+                with os.fdopen(fd, "w", encoding="utf-8") as f:
+                    json.dump(data, f, ensure_ascii=False, indent=2)
+                os.replace(tmp, self._params_path)
+            except Exception:
+                try: os.unlink(tmp)
+                except Exception: pass
+                raise
+        except Exception as e:
+            self._log(f"PID 参数保存失败: {e}")
+
+    def load_params(self):
+        """从磁盘加载 PID 参数; 文件不存在则用默认值。
+        返回 True 表示从磁盘恢复了值, False 表示用默认。"""
+        import json, os
+        try:
+            if not os.path.exists(self._params_path):
+                return False
+            with open(self._params_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            self.set_params(kp=data.get("kp"), ki=data.get("ki"),
+                            kd=data.get("kd"), persist=False)
+            t = data.get("target")
+            if t in ("face", "color", "tennis"):
+                self.target = t
+            self.color_key = data.get("color_key") or "custom"
+            self._log(f"PID 参数已恢复: kp={self.pid_x.kp:.3f}")
+            return True
+        except Exception as e:
+            self._log(f"PID 参数加载失败 (用默认): {e}")
+            return False
+
+    def reset_params(self):
+        """恢复硬编码默认值并持久化"""
+        self.set_params(kp=self.DEFAULT_PARAMS["kp"],
+                        ki=self.DEFAULT_PARAMS["ki"],
+                        kd=self.DEFAULT_PARAMS["kd"], persist=True)
+
+    def set_target_color(self, key: str):
+        """设置追踪的具体颜色 key（color_cfg 里的键）"""
+        with self._lock:
+            self.color_key = key or "custom"
 
     def params(self):
         return {"kp": self.pid_x.kp, "ki": self.pid_x.ki,
-                "kd": self.pid_x.kd, "target": self.target}
+                "kd": self.pid_x.kd, "target": self.target,
+                "color_key": self.color_key}
 
     def start(self):
         if self.running:
@@ -139,7 +220,15 @@ class PIDTracker:
             return (x + w / 2.0, y + h / 2.0), (x, y, w, h)
         else:
             from ..drivers.detectors import detect_color
-            blobs = detect_color(frame, self.get_color_cfg())
+            # 优先走唯一数据源 color_cfg；fallback 旧回调
+            try:
+                from ..core import color_cfg as cc
+                cfg = cc.get_cfg(self.color_key)
+            except Exception:
+                cfg = self.get_color_cfg() or {"h_min": 25, "h_max": 45,
+                                               "s_min": 90, "s_max": 255,
+                                               "v_min": 90, "v_max": 255}
+            blobs = detect_color(frame, cfg)
             if not blobs:
                 return None
             x, y, w, h = blobs[0][:4]

@@ -40,7 +40,7 @@ petcar/
 |------|----------|--------|
 | 🎨 OLED 帧动画表情 | `core/emotion_engine.py` | ✅ 12 种预设表情 + 眨眼/说话/思考/跳动动画，渲染去重防 I2C 阻塞 |
 | 🧠 情感状态机 | `core/mood_engine.py` | ✅ valence-arousal 二维模型 + 自然衰减 + 空闲行为 |
-| 🛡️ LLM 三层降级链 | `core/llm_backends.py` | ✅ Ollama → Doubao → Mock 规则引擎，断网断电都能跑 |
+| 🛡️ LLM 双后端 | `core/llm_backends.py` | ✅ Ollama / Doubao 二选一；不可用时对话直接报错（MockBackend 已移除） |
 | 🧩 Blockly 积木编程 | `blocks/` | ✅ 最小可用：运动 + 云台 + 表情 + 说话 + 拍照 + 视觉检测 + 控制流 |
 | 🎯 PID 视觉伺服 | `core/pid_tracker.py` | ✅ 支持 face / color / tennis 三种目标，绝对角度伺服无振荡 |
 | 📹 MJPEG 视频流 + 检测器注册 | `api/flask_app.py` | ✅ 9 种可切换检测器 + TFLite SSD 通用物体检测（COCO 80 类） |
@@ -86,7 +86,7 @@ petcar/
 
 ### 2.3 关键设计决策回顾（哪些做对了）
 
-1. **MockBackend 规则引擎** — Ollama 不可用时自动降级到正则匹配，教学演示不会因为模型加载失败而无法上课
+1. **（历史）MockBackend 规则引擎** — 曾用于 Ollama 不可用时降级到正则匹配；当前版本已删除该回退，只保留 Ollama / Doubao 双后端与本地固定指令短路，模型不可用时对话直接报错
 2. **EmotionEngine 渲染去重** — 发现 OLED 的 I2C 写入会阻塞电机总线，做了画面 key 去重，实测消除了"4 个轮子间隔 1s 依次启动"的问题
 3. **运动租约看门狗** — 0.6s 超时自动停车，积木循环里意外卡死也不会让底盘一直转
 4. **PID 追踪用绝对角度伺服** — 不累积增量直接算目标角度，无延迟超调振荡
@@ -512,31 +512,15 @@ PerceptionCache 和 flask_app.annotators 都从 registry 拿实例和 color_cfg�
 
 ## 五、P2 — 代码质量
 
-### 优化 #10：MockBackend 与 ChatAgent._LOCAL_RULES 规则重复
+### 优化 #10：MockBackend 与 ChatAgent._LOCAL_RULES 规则重复（已处理）
 
-两处正则匹配逻辑几乎相同，但维护两份容易漂移：
+当前版本已删除 `MockBackend`，本地正则只保留 `ChatAgent._LOCAL_RULES` 一份，原来的“两份规则漂移”问题随之消失：
 
 | 位置 | 文件 |
 |------|------|
-| ChatAgent 本地指令 | [core/chat_agent.py](file:///e:/work/AITank/petcar/core/chat_agent.py#L40-L56) `_LOCAL_RULES` |
-| MockBackend 规则引擎 | [core/llm_backends.py](file:///e:/work/AITank/petcar/core/llm_backends.py#L165-L213) `RULES` |
+| ChatAgent 本地指令（唯一一份） | [core/chat_agent.py](file:///e:/work/AITank/petcar/core/chat_agent.py) `_LOCAL_RULES` |
 
-**建议**：抽一份 `SKILL_RULES` 公共定义，ChatAgent 和 MockBackend 都引用它：
-
-```python
-# petcar/core/skill_rules.py
-
-# 每条: (regex_pattern, skill_name, args_builder, reply)
-SKILL_RULES = [
-    (r"摇(一)?摇(摇)?头|摇一摇", "express", lambda: {"action": "shake"}, "好的，我摇摇头~"),
-    (r"点(一)?点?头",            "express", lambda: {"action": "nod"},   "好的，我点点头~"),
-    ...
-]
-```
-
-ChatAgent._match_local_command 和 MockBackend.chat 都遍历同一份。
-
-**工作量**：~30 行定义 + 改两处消费逻辑。
+`llm_backends.py` 现在只包含 `OllamaBackend` 与 `DoubaoBackend`，不再有规则引擎，也没有 mock 回退。
 
 ---
 
@@ -549,7 +533,7 @@ config.py 有 60+ 常量：
 速度:          MOTOR_NORMAL_SPEED, MOTOR_MAX_SPEED
 LLM 参数:      LLM_BACKEND, OLLAMA_HOST, OLLAMA_MODEL, DOUBAO_*, LLM_*
 Pet 人格:      PET_NAME, PET_PERSONALITY, STARTUP_GREETING
-ASR 参数:      ASR_MODE, WHISPER_MODEL, WAKE_WORD, ASR_DEVICE, VAD_*
+ASR 参数:      WHISPER_MODEL, WAKE_WORD, ASR_DEVICE, VAD_*
 TTS 参数:      TTS_MODE, TTS_DEVICE, TTS_VOICE, TTS_PITCH, PIPER_*
 情感参数:      MOOD_DECAY_*, IDLE_SLEEPY_SEC, BLINK_INTERVAL
 Flask:         FLASK_HOST, FLASK_PORT
@@ -574,7 +558,7 @@ class HardwareConfig:
 
 @dataclass
 class LLMConfig:
-    backend: str = "ollama"            # ollama | doubao | mock
+    backend: str = "ollama"            # ollama | doubao
     ollama_host: str = "http://localhost:11434"
     ollama_model: str = "qwen2.5:0.5b"
     temperature: float = 0.7
@@ -689,7 +673,7 @@ return {
 │ ✅ COCO 通用检测接入积木 (person / cup / tv / pet)                  │
 │ ✅ 手势识别触发积木 (if_gesture)                                    │
 │ ✅ 变量积木 (set_var / get_var / compare) — 计时、计数              │
-│ ✅ 抽取 SKILL_RULES 公共定义, 消除 ChatAgent/MockBackend 规则重复    │
+│ ✅ 删除 MockBackend，本地规则仅保留 ChatAgent._LOCAL_RULES             │
 │ ✅ config → dataclass 化, runtime_config 自动生成字段                │
 │                                                                     │
 │ 交付物: 积木能覆盖从入门到进阶的完整课程                             │
@@ -716,7 +700,7 @@ return {
 | HardwareGuard 改造时引入新的死锁 | 所有 acquire 调用必须带 timeout 或 force_break_hold；HardwareGuard 自己带 watchdog，某 owner 持锁超过 5s 自动释放 |
 | 多事件帽子 IR 格式变化导致老程序不兼容 | `compile_program()` 加 `legacy_mode=False`，遇到老的单 hat 格式自动转换 |
 | 自然语言生成积木幻觉 | 先做 MVP：LLM 只输出 catalog.py 白名单里的积木组合 + 固定模板填充参数；后端做严格的白名单校验 |
-| Porcupine 需要 API Key | 配置里加 `--mock` 开关，MockBackend 也能通过关键词触发；或者用开源的 openWakeWord 替换 |
+| 唤醒词缺失影响免手操作 | 当前 ASR 只有 whisper，无唤醒词实现；课堂先用按键/面板触发，后续可评估 openWakeWord |
 
 ---
 
@@ -745,7 +729,7 @@ return {
 
 | # | 模块 | 文件 | 问题 |
 |---|------|------|------|
-| 10 | core | [chat_agent.py](file:///e:/work/AITank/petcar/core/chat_agent.py#L40) vs [llm_backends.py](file:///e:/work/AITank/petcar/core/llm_backends.py#L165) | `_LOCAL_RULES` 和 MockBackend.RULES 规则重复 |
+| 10 | core | chat_agent.py | 已处理：MockBackend 删除后，本地规则只剩 `_LOCAL_RULES` 一份 |
 | 11 | config+core | config.py + runtime_config.py | 配置项在两处维护 |
 
 ### 值得实现的新功能

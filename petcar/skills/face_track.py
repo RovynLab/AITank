@@ -32,6 +32,6 @@ class FaceTrackSkill(BaseSkill):
 
     def execute(self) -> str:
         if self.camera is None or self.ptz is None:
-            return "(Mock) 好的，我来追踪你~"
+            return "摄像头或云台未连接，无法追踪"
         self.camera.start_face_tracking(self.ptz, stop_after=30.0)
         return "好的，我来追踪你~ 30秒后自动停止"

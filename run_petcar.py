@@ -4,10 +4,10 @@ run_petcar.py — AI-PetCar 一键启动脚本
 ======================================
 
 用法:
-    python run_petcar.py              # 板上启动中控面板 (快速模式: ASR 走 mock)
+    python run_petcar.py              # 板上启动中控面板 + 语音交互
     python run_petcar.py --push       # 先推最新代码, 再启动
     python run_petcar.py --voice      # 开启麦克风语音对话 (whisper base, 较慢)
-    python run_petcar.py --full       # 真实语音链路 (加载 whisper small)
+    python run_petcar.py --full       # 真实语音链路 (加载配置默认 whisper 模型)
     python run_petcar.py --port 5000  # 指定端口
     python run_petcar.py --stop       # 停止板上进程
     python run_petcar.py --logs       # 查看最近日志
@@ -77,7 +77,7 @@ def stop(c, quiet: bool = False) -> None:
     print("[OK] 已强制停止旧进程")
 
 
-def start(c, port: int, full: bool, voice: bool = False,
+def start(c, port: int, voice: bool = False,
           offline: bool = False) -> None:
     sh(c, f"mkdir -p {os.path.dirname(LOG_FILE)}")
     # PYTHONUNBUFFERED: 日志重定向到文件时 print 是块缓冲的, 不实时
@@ -91,12 +91,9 @@ def start(c, port: int, full: bool, voice: bool = False,
         env += f"PETCAR_WHISPER_MODEL={os.environ.get('PETCAR_WHISPER_MODEL', 'base')} "
         # 板子直连 huggingface 不通, whisper 模型走国内镜像下载
         env += "HF_ENDPOINT=https://hf-mirror.com "
-    elif not full:
-        # 快速模式只跳过 whisper 模型加载, TTS 保留 (启动自我介绍/语音播报需要)
-        env += "PETCAR_ASR_MODE=mock "
 
     mode = f"语音对话 (whisper {os.environ.get('PETCAR_WHISPER_MODEL', 'base')})" \
-        if voice else ("完整语音" if full else "快速模式")
+        if voice else "完整语音"
     # 不传 --flask: 让 main.py 同时跑 Flask 和语音循环, 否则机器人根本不收音
     args = f"--port {port}"
 
@@ -145,10 +142,8 @@ def push() -> None:
 def main() -> None:
     p = argparse.ArgumentParser(description="AI-PetCar 一键启动")
     p.add_argument("--port", type=int, default=5000, help="Web 端口, 默认 5000")
-    p.add_argument("--full", action="store_true", help="加载真实 ASR (whisper small, 较慢)")
+    p.add_argument("--full", action="store_true", help="使用配置默认 whisper 模型（默认行为）")
     p.add_argument("--voice", action="store_true", help="开启麦克风语音对话 (whisper base)")
-    p.add_argument("--rules", action="store_true",
-                   help="回复走本地规则 (不用 LLM, 秒回, 适合指令控制)")
     p.add_argument("--offline", action="store_true",
                    help="语音改用本地离线童声 (piper), 不依赖外网")
     p.add_argument("--push", action="store_true", help="启动前先推送代码")
@@ -160,9 +155,6 @@ def main() -> None:
     if args.push:
         push()
         args.restart = True  # 推了新代码就必须重启, 否则跑的还是旧代码
-
-    if args.rules:
-        os.environ["PETCAR_LLM_BACKEND"] = "mock"
 
     c = connect()
     try:
@@ -179,7 +171,7 @@ def main() -> None:
         elif is_running(c):
             print(f"[OK] 已在运行 → http://{HOST}:{args.port}/  (要重启请加 --restart)")
             return
-        start(c, args.port, args.full, args.voice, args.offline)
+        start(c, args.port, args.voice, args.offline)
     finally:
         c.close()
 

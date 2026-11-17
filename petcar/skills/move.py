@@ -55,7 +55,7 @@ class MoveSkill(BaseSkill):
 
     def execute(self, direction: str, duration: float = 2.0) -> str:
         if self.mecanum is None:
-            return f"(Mock) 好的，我向{direction}方向移动{duration}秒！"
+            return "底盘未连接，无法移动"
         direction = direction or "forward"
         duration = float(duration or 2.0)
         duration = max(0.5, min(30.0, duration))

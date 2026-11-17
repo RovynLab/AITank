@@ -77,13 +77,10 @@ class EmojiRobot:
     _instance = None
     _instance_lock = threading.Lock()
 
-    def __init__(self, auto_connect: bool = True, mock: bool = False):
+    def __init__(self, auto_connect: bool = True):
         """
         auto_connect=True 时自动连接所有硬件驱动。
-        mock=True 时不碰硬件 (开发机上跑)。
         """
-        self.mock = mock
-
         # 延迟导入 — 避免循环 import + 启动慢
         self.oled = None
         self.emotion = None

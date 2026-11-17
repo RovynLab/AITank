@@ -19,13 +19,15 @@ class BlockRuntime:
     """解释器只通过这个门面操作硬件"""
 
     def __init__(self, mecanum=None, ptz=None, camera=None,
-                 emotion=None, tts=None, log=None):
+                 emotion=None, tts=None, log=None,
+                 pid_tracker=None):
         self.mecanum = mecanum
         self.ptz = ptz
         self.camera = camera
         self.emotion = emotion
         self.tts = tts
         self._log = log or (lambda level, msg: None)
+        self.pid_tracker = pid_tracker   # 外部注入，保证只有一个实例
 
         self._lock = threading.Lock()
         self._moving = False
@@ -142,6 +144,14 @@ class BlockRuntime:
                 self._log("warn", f"语音播放失败: {e}")
         return duration
 
+    def stop_tts(self):
+        """立即打断正在播放的 TTS —— 停积木程序时调用"""
+        if self.tts is not None:
+            try:
+                self.tts.stop()
+            except Exception as e:
+                self._log("warn", f"打断语音失败: {e}")
+
     # ========================================================================
     # 拍照 / 识别
     # ========================================================================
@@ -157,8 +167,68 @@ class BlockRuntime:
     def sees(self, target: str) -> bool:
         return self.perception.sees(target)
 
+    def sees_color(self, key: str) -> bool:
+        return self.perception.sees_color(key)
+
+    def color_box(self, key: str) -> list | None:
+        return self.perception.color_box(key)
+
     def perception_snapshot(self) -> dict:
         return self.perception.snapshot()
+
+    def set_needed_colors(self, keys: list[str] | set[str] | None):
+        """告诉感知线程当前程序用到哪些颜色"""
+        self.perception.set_needed_colors(keys)
+
+    # ========================================================================
+    # 颜色追踪（P1）
+    # ========================================================================
+    def pid_tracker_running(self) -> bool:
+        if self.pid_tracker is None:
+            return False
+        try:
+            return bool(self.pid_tracker.running)
+        except Exception:
+            return False
+
+    def stop_pid_tracker(self, arbitrate: bool = False):
+        """停止 PID 追踪（仲裁用）"""
+        if self.pid_tracker is None:
+            return
+        try:
+            self.pid_tracker.stop()
+        except Exception as e:
+            self._log("warn", f"PID 追踪停止失败: {e}")
+
+    def start_color_track(self, color_key: str) -> bool:
+        """启动 PID 视觉伺服追踪指定颜色 —— 用面板持久化的 PID 参数"""
+        if self.pid_tracker is None or self.camera is None or self.ptz is None:
+            self._log("warn", "颜色追踪不可用（云台/摄像头未连接）")
+            return False
+        try:
+            # 1) 先恢复面板持久化的 PID 参数 (双保险: 不假设面板之前一定 set 过)
+            restored = self.pid_tracker.load_params()
+            if restored:
+                p = self.pid_tracker.params()
+                self._log("info", "PID 参数已恢复 (kp={:.3f}, 增益={:.1f})".format(
+                    p["kp"], p["kp"] * 25))
+            # 2) 设置目标颜色 (不覆盖面板 kp/ki/kd)
+            self.pid_tracker.set_target_color(color_key)
+            self.pid_tracker.set_params(target="color", persist=False)
+            # 3) 启动
+            self.pid_tracker.start()
+            return True
+        except Exception as e:
+            self._log("warn", f"启动颜色追踪失败: {e}")
+            return False
+
+    def stop_color_track(self):
+        if self.pid_tracker is None:
+            return
+        try:
+            self.pid_tracker.stop()
+        except Exception as e:
+            self._log("warn", f"停止颜色追踪失败: {e}")
 
     # ========================================================================
     # 生命周期
@@ -172,10 +242,14 @@ class BlockRuntime:
     def release_all(self):
         self.stop_motion()
         self.stop_perception()
+        self.stop_color_track()
+        self.stop_tts()
 
     def emergency_stop(self):
         # 先停电机, 采样线程异步退出, 保证急停接口快速返回
         self.stop_motion()
+        self.stop_color_track()
+        self.stop_tts()
         self.perception.abort()
 
     def shutdown(self):

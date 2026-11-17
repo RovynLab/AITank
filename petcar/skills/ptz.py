@@ -42,7 +42,7 @@ class PTZSkill(BaseSkill):
 
     def execute(self, direction: str, delta: float = 10.0) -> str:
         if self.ptz is None:
-            return f"(Mock) 我要往{direction}方向看 {delta} 度"
+            return "云台未连接，无法转动"
         delta = float(delta or 10.0)
         delta = max(1.0, min(45.0, delta))
 

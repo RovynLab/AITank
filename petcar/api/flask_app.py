@@ -103,8 +103,17 @@ def _sys_stats() -> dict:
 # ============================================================================
 def create_app(chat=None, emotion=None, mecanum=None, ptz=None, camera=None,
                mood_engine=None, tts=None, asr=None, skill_manager=None,
-               block_service=None, action_player=None):
-    """创建 Flask app。所有参数可选, 传了就用, 不传就 Mock/降级"""
+               block_service=None, action_player=None, pid_tracker=None,
+               init_status_ref: dict | None = None,
+               loading_html: str | None = None):
+    """
+    创建 Flask app。所有模块参数可选 (不传则对应 API 返回 503)。
+
+    新增参数:
+      init_status_ref  外部 init 状态 dict 的引用, 用于 /api/init 路由
+                       和首页 ready gate (未 ready 时返回 loading 页)
+      loading_html     未 ready 时首页返回的 HTML 字符串
+    """
     try:
         from flask import Flask, request, jsonify, Response, send_file
     except ImportError:
@@ -118,18 +127,41 @@ def create_app(chat=None, emotion=None, mecanum=None, ptz=None, camera=None,
     runtime_config.load()
 
     app = Flask(__name__, static_folder=os.path.join(_HERE, "static"))
+    app.config["init_status"] = init_status_ref or {}
+    app.config["modules"] = {
+        "chat": chat, "emotion": emotion, "mecanum": mecanum, "ptz": ptz,
+        "camera": camera, "mood_engine": mood_engine,
+        "tts": tts, "asr": asr, "skill_manager": skill_manager,
+        "block_service": block_service, "action_player": action_player,
+    }
     log = EventLog()
     log.add("sys", "Flask 已启动")
 
+    # 从 app.config 热取模块（支持 lazy 启动后注入）
+    def _mod(name):
+        """每次调用都从 app.config 取，所以外部 app.config["modules"]=new_m 后立即生效"""
+        return app.config.get("modules", {}).get(name)
+
+    # ---- /api/init ----
+    if init_status_ref is not None:
+        @app.route("/api/init")
+        def init_api():
+            return jsonify(dict(init_status_ref))  # 拷贝返回, 防止外部修改
+
+    # 前端视图锁: 积木页视频活跃时告诉中控面板暂停自己的视频 (省带宽/CPU)
+    # 积木页进入 → POST /api/blocks/view/enter; 离开 → /exit
+    app.config["blocks_video_active"] = False
+
     def _blocks_busy():
         """积木程序运行时, 手动运动控制让位, 只保留急停和只读接口"""
-        return bool(block_service and block_service.is_running())
+        return bool(_mod("block_service") and _mod("block_service").is_running())
 
     def _cancel_action():
         """手动控制前先中断正在播放的宠物动作, 避免两条指令抢底盘"""
-        if action_player is not None:
+        ap = _mod("action_player")
+        if ap is not None and ap.is_busy():
             try:
-                action_player.stop()
+                ap.stop()
             except Exception:
                 pass
 
@@ -141,12 +173,13 @@ def create_app(chat=None, emotion=None, mecanum=None, ptz=None, camera=None,
 
     def _apply_runtime(changed):
         hot = set(changed or [])
-        if chat is not None and (hot & (_LLM_KEYS | {"pet_name", "personality"})):
-            chat.apply_config(rebuild_backend=bool(hot & _LLM_KEYS))
-        if tts is not None and (hot & _TTS_KEYS):
-            tts.apply_config()
-        if asr is not None and "asr_device" in hot:
-            asr.apply_config()
+        _chat, _tts, _asr = _mod("chat"), _mod("tts"), _mod("asr")
+        if _chat is not None and (hot & (_LLM_KEYS | {"pet_name", "personality"})):
+            _chat.apply_config(rebuild_backend=bool(hot & _LLM_KEYS))
+        if _tts is not None and (hot & _TTS_KEYS):
+            _tts.apply_config()
+        if _asr is not None and "asr_device" in hot:
+            _asr.apply_config()
 
     # ASR 一次性识别任务状态
     asr_job = {"running": False, "result": None, "done": False}
@@ -160,11 +193,9 @@ def create_app(chat=None, emotion=None, mecanum=None, ptz=None, camera=None,
         from ..drivers.detectors import (get_detector, detect_tennis_ball,
                                          detect_motion, detect_color)
         from ..drivers.gesture import GestureDetector
+        from ..core import color_cfg as cc
         _motion_state = {}
         _gesture = GestureDetector(log=lambda msg: log.add("sys", msg))
-        # 颜色识别 HSV 配置 (P1 面板可调, P2 颜色追踪复用)
-        color_cfg = {"h_min": 25, "h_max": 45, "s_min": 90,
-                     "s_max": 255, "v_min": 90, "v_max": 255}
         # 检测器共享一次推理结果并按帧限频复用缓存框 (TFLite ~150ms, 每 2 帧一次)
         _dnn_cache = {"m": "uninit", "raw": [], "frame_id": -1, "count": 0}
 
@@ -217,7 +248,7 @@ def create_app(chat=None, emotion=None, mecanum=None, ptz=None, camera=None,
             # P1 颜色识别 (HSV 可调), 也是 P2 颜色追踪的目标源
             "color": {"label": "颜色", "tag": "color", "color": (0, 220, 220),
                       "enabled": False,
-                      "detect": lambda f: [(x, y, w, h, s) for x, y, w, h, s, _ in detect_color(f, color_cfg)]},
+                      "detect": lambda f: [(x, y, w, h, s) for x, y, w, h, s, _ in detect_color(f, cc.get_custom())]},
             # 手势识别 (点击即开始), 框上叠加手势结果
             "gesture": {"label": "手势识别", "tag": "gesture",
                         "color": (255, 0, 200), "enabled": False,
@@ -226,14 +257,11 @@ def create_app(chat=None, emotion=None, mecanum=None, ptz=None, camera=None,
     except Exception as e:
         log.add("sys", f"检测器注册失败: {e}")
 
-    # P2 PID 追踪器 (人脸 / 颜色积木)
-    pid_tracker = None
-    if camera and ptz:
+    # P2 PID 追踪器 (人脸 / 颜色积木) — 用 main.py 注入的唯一实例
+    if pid_tracker is None and camera and ptz:
         try:
             from ..core.pid_tracker import PIDTracker
-            pid_tracker = PIDTracker(
-                camera, ptz, get_color_cfg=lambda: color_cfg,
-                log=lambda msg: log.add("sys", msg))
+            pid_tracker = PIDTracker(camera, ptz)
         except Exception as e:
             log.add("sys", f"PID 追踪器初始化失败: {e}")
 
@@ -258,17 +286,34 @@ def create_app(chat=None, emotion=None, mecanum=None, ptz=None, camera=None,
                                        kd=d.get("kd"), target=d.get("target"))
         return jsonify({"ok": True, **pid_tracker.status()})
 
-    # ========== /api/color_cfg (P1 颜色识别 HSV) ==========
+    # ========== /api/color_cfg (颜色识别 HSV 唯一数据源) ==========
     @app.route("/api/color_cfg", methods=["GET", "POST"])
     def color_cfg_api():
-        if request.method == "POST":
+        try:
+            from ..core import color_cfg as cc
+        except Exception:
+            cc = None
+        if request.method == "POST" and cc:
             d = request.get_json(silent=True) or {}
-            for k in ("h_min", "h_max", "s_min", "s_max", "v_min", "v_max"):
-                if k in d:
-                    hi = 180 if k.startswith("h") else 255
-                    color_cfg[k] = max(0, min(hi, int(d[k])))
-            log.add("sys", "颜色识别参数已更新")
-        return jsonify(color_cfg)
+            updates = {k: d[k] for k in ("h_min", "h_max", "s_min", "s_max",
+                                          "v_min", "v_max") if k in d}
+            if updates:
+                cc.set_custom(updates)
+                log.add("sys", "颜色识别参数已更新")
+        if cc:
+            return jsonify({
+                "custom": cc.get_custom(),
+                "presets": {k: {"label": v["label"],
+                                "h_min": v["h_min"], "h_max": v["h_max"],
+                                "s_min": v["s_min"], "s_max": v["s_max"],
+                                "v_min": v["v_min"], "v_max": v["v_max"]}
+                            for k, v in cc.COLOR_PRESETS.items()},
+            })
+        return jsonify({
+            "custom": {"h_min": 25, "h_max": 45, "s_min": 90, "s_max": 255,
+                       "v_min": 90, "v_max": 255},
+            "presets": {},
+        })
     if camera:
         annotators["face"] = {
             "label": "人脸",
@@ -280,6 +325,49 @@ def create_app(chat=None, emotion=None, mecanum=None, ptz=None, camera=None,
                 for cx, cy, w, h, score in camera.detect_faces(frame)
             ],
         }
+        annotators["tennis"] = {
+            "label": "网球",
+            "tag": "tennis",
+            "color": (0, 220, 255),
+            "enabled": False,
+            "detect": lambda frame: [
+                (int(b[0]), int(b[1]), int(b[2]), int(b[3]), 1.0)
+                for b in (_detect_tennis(frame) if _detect_tennis else [])
+            ],
+        }
+        annotators["color"] = {
+            "label": "颜色",
+            "tag": "color",
+            "color": (255, 80, 80),
+            "enabled": False,
+            "detect": lambda frame: [
+                (int(b["box"][0]), int(b["box"][1]),
+                 int(b["box"][2]), int(b["box"][3]), float(b["area"]))
+                for b in (_recent_color_boxes() or [])
+            ],
+        }
+        # helper: 从 PerceptionCache 拿最近颜色块位置
+        def _recent_color_boxes():
+            try:
+                if block_service is None: return []
+                cache = getattr(block_service, 'runtime', None)
+                cache = getattr(cache, 'perception', None)
+                if cache is None: return []
+                snap = cache.snapshot()
+                out = []
+                colors = snap.get('colors', {}) if snap else {}
+                for key, info in colors.items():
+                    if info.get('visible') and info.get('box'):
+                        out.append({'box': info['box'], 'area': info.get('area', 0)})
+                return out
+            except Exception:
+                return []
+        def _detect_tennis(frame):
+            try:
+                from ..drivers.detectors import detect_tennis_ball
+                return detect_tennis_ball(frame) or []
+            except Exception:
+                return []
 
     # ========== /api/detect ==========
     @app.route("/api/detect", methods=["GET", "POST"])
@@ -305,6 +393,19 @@ def create_app(chat=None, emotion=None, mecanum=None, ptz=None, camera=None,
     @app.route("/api/health")
     def health():
         return jsonify({"ok": True, "time": time.time()})
+
+    # ========== /api/blocks/view (前端视图锁) ==========
+    # 积木页视频活跃 → 中控面板自动关闭自己的视频, 省带宽/CPU
+    @app.route("/api/blocks/view", methods=["GET", "POST"])
+    def blocks_view_api():
+        if request.method == "POST":
+            data = request.get_json(silent=True) or {}
+            action = data.get("action", "enter")
+            if action == "enter":
+                app.config["blocks_video_active"] = True
+            elif action == "exit":
+                app.config["blocks_video_active"] = False
+        return jsonify({"blocks_video_active": app.config.get("blocks_video_active", False)})
 
     # ========== /api/emotion ==========
     @app.route("/api/emotion", methods=["GET", "POST"])
@@ -559,11 +660,20 @@ def create_app(chat=None, emotion=None, mecanum=None, ptz=None, camera=None,
                     time.sleep(0.2)
                     continue
                 last_frame_at = time.time()
-                # 画框: 已开启的检测标注 + PID 追踪目标 (需画就先拷贝, 不污染共享帧)
+                # 画框: 已开启的检测标注 + 积木运行自动启用 + PID 追踪目标
                 try:
+                    # 积木跑起来自动启用对应 annotator（程序用到 face/tennis/color）
+                    program_auto = set()
+                    if block_service is not None and block_service.is_running():
+                        program_auto.update(block_service.program_annotator_keys())
                     track_box = (pid_tracker.last_box if pid_tracker
                                  and pid_tracker.running else None)
-                    active = [a for a in annotators.values() if a["enabled"]]
+                    active = []
+                    for a in annotators.values():
+                        if a["enabled"]:
+                            active.append(a)
+                        elif a.get("tag") in program_auto:
+                            active.append(a)
                     if active or track_box:
                         frame = frame.copy()
                         for a in active:
@@ -701,11 +811,11 @@ def create_app(chat=None, emotion=None, mecanum=None, ptz=None, camera=None,
         out["config"] = {
             "llm_backend": config.LLM_BACKEND,
             "llm_model": getattr(config, "OLLAMA_MODEL", ""),
-            "asr_mode": config.ASR_MODE,
+            "asr_mode": getattr(asr, "mode", "whisper"),
             "tts_mode": config.TTS_MODE,
             "pet_name": config.PET_NAME,
         }
-        # 语音驱动实际模式 (加载失败会回退 mock, 与配置值可能不同)
+        # 语音驱动实际模式 (与配置值可能不同)
         out["voice"] = {"asr": getattr(asr, "mode", None),
                         "tts": getattr(tts, "mode", None)}
         return jsonify(out)
@@ -854,11 +964,17 @@ def create_app(chat=None, emotion=None, mecanum=None, ptz=None, camera=None,
     @app.route("/")
     @app.route("/dashboard")
     def index():
+        # ready gate: 未 ready 时返回 loading 页
+        st = app.config.get("init_status") or {}
+        if st.get("ready") is not True and loading_html is not None:
+            return Response(loading_html, mimetype="text/html")
         return send_file(os.path.join(app.static_folder, "dashboard.html"))
 
     # ========== 积木编程 ==========
     if block_service is not None:
         from .block_api import register_block_api
-        register_block_api(app, block_service)
+        # pid_tracker 注入供文件 API 里读取积木运行时状态
+        app.config["modules"]["pid_tracker"] = pid_tracker
+        register_block_api(app, block_service, pid_tracker=pid_tracker)
 
     return app

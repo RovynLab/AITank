@@ -173,10 +173,18 @@ class NanoDet:
                 np.concatenate(all_l))
 
 
-def detect_color(frame, cfg):
+def detect_color(frame, cfg, hsv=None, min_area: int = 300):
     """按 HSV 范围检测颜色块。cfg: {h_min,h_max,s_min,s_max,v_min,v_max}
-    返回 [(x, y, w, h, score, cls_id=-1), ...], 面积越大概率越高。"""
-    hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+    Args:
+        frame: BGR 帧
+        cfg: HSV 阈值
+        hsv: 可选, 预计算的 HSV 帧 (多颜色共用时节省 cvtColor)
+        min_area: 最小轮廓面积 (默认 300)
+    返回:
+        [(x, y, w, h, score, cls_id=-1), ...], 面积越大越靠前。
+    """
+    if hsv is None:
+        hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
     h_min, h_max = cfg.get("h_min", 0), cfg.get("h_max", 180)
     lo = (h_min, cfg.get("s_min", 90), cfg.get("v_min", 90))
     hi = (h_max, cfg.get("s_max", 255), cfg.get("v_max", 255))
@@ -192,12 +200,29 @@ def detect_color(frame, cfg):
     out = []
     for c in cnts:
         area = cv2.contourArea(c)
-        if area < 300:
+        if area < min_area:
             continue
         x, y, w, h = cv2.boundingRect(c)
         out.append((x, y, w, h, min(0.99, area / 20000.0), -1))
     out.sort(key=lambda b: b[2] * b[3], reverse=True)
     return out
+
+
+def detect_color_blob(frame, cfg, hsv=None):
+    """detect_color 的结构化版本，直接返回最大色块的信息字典，方便 PID 追踪和感知快照。
+    Returns:
+        None 或 {"x","y","w","h","cx","cy","area","score"}
+    """
+    blobs = detect_color(frame, cfg, hsv=hsv)
+    if not blobs:
+        return None
+    x, y, w, h, score, _ = blobs[0]
+    return {
+        "x": x, "y": y, "w": w, "h": h,
+        "cx": x + w / 2.0, "cy": y + h / 2.0,
+        "area": w * h,
+        "score": score,
+    }
 
 
 def detect_tennis_ball(frame):

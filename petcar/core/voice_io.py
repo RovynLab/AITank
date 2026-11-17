@@ -61,72 +61,88 @@ class VoiceIO:
     def _loop(self):
         """阻塞式主循环"""
         print("\n========== PetCar 语音交互 ==========")
-        if self.asr.mode == "mock":
-            print("输入文字回车 (MockASR), 输入 'quit' 退出")
-        else:
-            print(f"直接说话即可 (ASR={self.asr.mode}), 输入 'quit' 退出")
+        print(f"直接说话即可 (ASR={self.asr.mode}), 输入 'quit' 退出")
         print("======================================\n")
 
+        _paused_since = 0.0   # 记录 asr.paused 什么时候开始的, 超时自动恢复
         while self._running:
-            try:
-                # TTS 还在播 / 面板正在做对话测试时不要收音
-                while self._running and (self.tts.is_speaking()
-                                         or self.asr.paused):
+            # TTS 还在播 / 面板正在做对话测试时不要收音
+            while self._running:
+                if self.tts.is_speaking():
+                    _paused_since = 0.0
                     time.sleep(0.2)
-
-                # 1. 思考表情
-                if self.emotion:
-                    self.emotion.start_think(duration=3.0)
-
-                # 2. 监听用户
-                text = self.asr.listen(timeout=15.0)
-
-                if text is None:
                     continue
-                text = text.strip()
-                if not text:
-                    continue
-                if text.lower() in ("quit", "exit", "退出"):
-                    print("[VoiceIO] 退出")
-                    break
-
-                print(f"\n[你] {text}")
-
-                # 回声保护: 识别结果跟自己刚说的话高度重合就丢掉
-                if self._last_spoken and (text in self._last_spoken
-                                          or text[:6] in self._last_spoken):
-                    print("[VoiceIO] 忽略回声")
-                    continue
-
-                # 3. 调 LLM
-                if self.chat:
-                    resp = self.chat.chat(text)
-                else:
-                    resp = type("Resp", (), {
-                        "reply": f"(ChatAgent 未配置) 你说的是「{text}」呀",
-                        "emotion": "neutral",
-                        "tools_called": [],
-                    })()
-
-                # 4. 同步表情
-                if self.emotion:
-                    self.emotion.set_emotion(resp.emotion)
-
-                # 5. 播放语音 + 嘴巴动画
-                reply_text = resp.reply or ""
-                if reply_text:
-                    if self.emotion:
-                        self.emotion.start_speak(duration=max(2, len(reply_text) * 0.15))
-                    print(f"[{resp.emotion}] {reply_text}")
-                    self.tts.speak(reply_text, emotion=resp.emotion)
-                    self._last_spoken = reply_text
-                    # 等扬声器余音消散, 免得下一轮把自己的声音当成用户说话
-                    time.sleep(0.5)
-
-            except KeyboardInterrupt:
-                print("\n[VoiceIO] Ctrl+C, 退出")
+                if self.asr.paused:
+                    if _paused_since == 0.0:
+                        _paused_since = time.time()
+                    elapsed = time.time() - _paused_since
+                    # 面板用完麦克风后应恢复 paused=False, 但如果面板线程异常
+                    # 退出没走到 finally, paused 会一直卡住 → 等 20 秒后自动恢复
+                    if elapsed > 20.0:
+                        print("[VoiceIO] asr.paused 超时, 自动恢复收音")
+                        self.asr.release()
+                        _paused_since = 0.0
+                    else:
+                        time.sleep(0.2)
+                        continue
+                _paused_since = 0.0
                 break
-            except Exception as e:
-                print(f"[VoiceIO] 异常: {e}")
+
+            # 1. 等待表情 (在 VAD 静音期间显示, 让用户知道小车在听)
+            if self.emotion:
+                self.emotion.set_emotion("neutral")
+                self.emotion.start_think(duration=12.0)
+                self.emotion.text_bubble("我在听...", duration=6.0)
+
+            # 2. 监听用户
+            text = self.asr.listen(timeout=15.0)
+
+            if text is None:
+                continue
+            text = text.strip()
+            if not text:
+                continue
+            if text.lower() in ("quit", "exit", "退出"):
+                print("[VoiceIO] 退出")
+                break
+
+            print(f"\n[你] {text}")
+
+            # 回声保护: 识别结果跟自己刚说的话高度重合就丢掉
+            if self._last_spoken and (text in self._last_spoken
+                                      or text[:6] in self._last_spoken):
+                print("[VoiceIO] 忽略回声")
+                continue
+
+            # 3. 调 LLM — 期间一直显示 "思考中..."
+            if self.emotion:
+                self.emotion.start_think(duration=60.0)   # 足够覆盖 LLM 最长延迟
+                self.emotion.text_bubble("思考中...", duration=60.0)
+
+            if self.chat:
+                resp = self.chat.chat(text)
+            else:
+                resp = type("Resp", (), {
+                    "reply": f"(ChatAgent 未配置) 你说的是「{text}」呀",
+                    "emotion": "neutral",
+                    "tools_called": [],
+                })()
+
+            # 4. LLM 返回后, 清掉 "思考中", 切换到对应情绪
+            if self.emotion:
+                self.emotion.clear_text()
+                self.emotion.set_emotion(resp.emotion, duration=2.0)
+
+            # 5. 播放语音 + 嘴巴动画
+            reply_text = resp.reply or ""
+            if reply_text:
+                if self.emotion:
+                    self.emotion.start_speak(duration=max(2, len(reply_text) * 0.15))
+                print(f"[{resp.emotion}] {reply_text}")
+                self.tts.speak(reply_text, emotion=resp.emotion)
+                self._last_spoken = reply_text
+                # 等扬声器余音消散, 免得下一轮把自己的声音当成用户说话
+                # 也避免喇叭回声抬高 VAD baseline
+                time.sleep(1.0)
 
         self._running = False

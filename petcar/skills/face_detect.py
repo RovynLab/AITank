@@ -31,7 +31,7 @@ class FaceDetectSkill(BaseSkill):
 
     def execute(self) -> str:
         if self.camera is None:
-            return "(Mock) 我好像看到有个人哦~"
+            return "摄像头未连接，无法识别人脸"
         faces = self.camera.detect_faces()
         if not faces:
             return "我没看到有人哦"

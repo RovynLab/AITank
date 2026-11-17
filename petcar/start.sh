@@ -4,11 +4,10 @@
 # -----------------------------------------------------------------------------
 # 放在 petcar 根目录，SSH 登录树莓派后直接使用：
 #
-#   ./petcar/start.sh                  # 启动（快速模式：只开面板，ASR 走 mock）
-#   ./petcar/start.sh --voice          # 启动并开启真实语音对话（whisper base）
+#   ./petcar/start.sh                  # 启动（面板 + 完整语音交互）
+#   ./petcar/start.sh --voice          # 启动并开启语音对话（whisper base）
 #   ./petcar/start.sh --full           # 完整语音链路（whisper 使用配置默认模型）
 #   ./petcar/start.sh --voice --offline # 语音 + 本地 Piper 离线童声
-#   ./petcar/start.sh --rules          # 不调用大模型，只走本地指令规则
 #   ./petcar/start.sh --port 5001      # 指定端口
 #
 #   ./petcar/start.sh status           # 查看运行状态
@@ -24,8 +23,8 @@
 #   - 用 setsid 脱离 SSH 会话，退出 SSH 后进程继续运行；
 #   - 重复执行 start 不会启动第二个实例，会直接提示已在运行；
 #   - 注意：面板保存的 data/config_local.json 优先级高于本脚本设置的环境变量，
-#     若面板里保存过 asr_mode / llm_backend / tts_mode，对应模式会以面板配置为准；
-#     需要让本脚本的 --voice / --rules / --offline 生效时，先在面板「恢复默认」
+#     若面板里保存过 llm_backend / tts_mode，对应配置会以面板配置为准；
+#     需要让本脚本的 --offline 生效时，先在面板「恢复默认」
 #     或删除 data/config_local.json。详见 docs/进程与启动控制.md。
 # =============================================================================
 
@@ -41,10 +40,10 @@ PROC_PATTERN="[p]etcar.main"
 
 # ---------- 默认参数 ----------
 ACTION="start"
-MODE="fast"          # fast | voice | full
+MODE="full"          # voice | full
 OFFLINE=0
-RULES=0
 PORT="${PETCAR_PORT:-5000}"
+WHISPER_URL="${PETCAR_WHISPER_URL:-http://127.0.0.1:8091}"
 
 usage() {
     cat <<'EOF'
@@ -59,10 +58,9 @@ usage() {
   foreground   前台运行，调试用，Ctrl+C 退出
 
 选项:
-  --voice      开启真实语音对话（whisper base，启动较慢）
-  --full       完整语音链路（whisper 使用配置默认模型）
+  --voice      开启语音对话（whisper base，启动较慢）
+  --full       完整语音链路（whisper 使用配置默认模型，默认行为）
   --offline    语音合成改用本地 Piper，不依赖外网
-  --rules      不调用大模型，只走本地指令规则
   --port N     指定 Web 端口，默认 5000
   -h, --help   显示本帮助
 
@@ -89,7 +87,6 @@ while [ $# -gt 0 ]; do
         --voice) MODE="voice"; shift ;;
         --full) MODE="full"; shift ;;
         --offline) OFFLINE=1; shift ;;
-        --rules) RULES=1; shift ;;
         -f|--follow) FOLLOW=1; shift ;;
         -h|--help) usage; exit 0 ;;
         *) echo "未知参数: $1"; echo; usage; exit 1 ;;
@@ -137,6 +134,30 @@ board_ip() {
     hostname -I 2>/dev/null | awk '{print $1}'
 }
 
+# ---------- 等 whisper_service ----------
+wait_whisper_service() {
+    # whisper_service 开机预加载模型约 60s, 等它 ready 再启动 petcar
+    local ready=0
+    local url="$WHISPER_URL/health"
+    echo "[..] 等待 whisper_service 就绪 (最长 120s)..."
+    for _ in $(seq 1 60); do
+        local code body
+        code=$(curl -s -o /tmp/_whisper_health.json -w '%{http_code}' "$url" 2>/dev/null || echo "000")
+        if [ "$code" = "200" ] && grep -q '"ok".*true.*"loaded".*true' /tmp/_whisper_health.json 2>/dev/null; then
+            ready=1
+            break
+        fi
+        sleep 2
+    done
+    if [ "$ready" = "1" ]; then
+        echo "[OK] whisper_service ready"
+    else
+        echo "[!] whisper_service 未就绪, petcar 继续启动但 ASR 可能不可用"
+        echo "    查看: sudo systemctl status aitank-whisper"
+    fi
+    rm -f /tmp/_whisper_health.json
+}
+
 # ---------- 停止 ----------
 do_stop() {
     local pids
@@ -171,27 +192,21 @@ do_stop() {
 build_env() {
     ENV="PYTHONUNBUFFERED=1"
     ENV="$ENV PETCAR_LLM_BACKEND=${PETCAR_LLM_BACKEND:-ollama}"
+    ENV="$ENV PETCAR_WHISPER_URL=${WHISPER_URL}"
 
     case "$MODE" in
-        fast)
-            # 快速模式：不加载 whisper，面板和 TTS 正常
-            ENV="$ENV PETCAR_ASR_MODE=${PETCAR_ASR_MODE:-mock}"
-            ;;
         voice)
-            # 真实语音：base 模型在 2GB 内存板上更稳；模型下载走国内镜像
+            # 语音对话：base 模型在 2GB 内存板上更稳；模型下载走国内镜像
             ENV="$ENV PETCAR_WHISPER_MODEL=${PETCAR_WHISPER_MODEL:-base}"
             ENV="$ENV HF_ENDPOINT=${HF_ENDPOINT:-https://hf-mirror.com}"
             ;;
         full)
-            # 完整模式：ASR 模型与模式全部沿用 config / 环境变量
+            # 完整模式：whisper 模型与麦克风配置沿用 config / 环境变量
             ;;
     esac
 
     if [ "$OFFLINE" = "1" ]; then
         ENV="$ENV PETCAR_TTS_MODE=${PETCAR_TTS_MODE:-piper}"
-    fi
-    if [ "$RULES" = "1" ]; then
-        ENV="$ENV PETCAR_LLM_BACKEND=mock"
     fi
 }
 
@@ -210,6 +225,7 @@ do_start() {
     fi
 
     build_env
+    wait_whisper_service
 
     echo "[..] 启动 petcar (模式: $MODE, 端口: $PORT)"
     cd "$ROOT_DIR" || return 1

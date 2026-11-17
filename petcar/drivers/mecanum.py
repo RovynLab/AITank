@@ -71,7 +71,7 @@ class MecanumDriver:
             self._release = Adafruit_MotorHAT.RELEASE
         else:
             self._motors = None
-            print("[Mecanum] Adafruit_MotorHAT 未安装, Mock 模式")
+            print("[Mecanum] Adafruit_MotorHAT 未安装, 底盘不可用")
 
     # ---- 底层 ----
     def _apply(self, dirs, name: str = None):

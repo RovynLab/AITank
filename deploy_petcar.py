@@ -155,31 +155,16 @@ def step_test(c):
     except Exception:
         print(f"  ❌ Ollama 解析失败: {out[:200]}")
 
-    # Test B: petcar MockBackend
-    print("\n  --- Test B: petcar MockBackend (不碰硬件) ---")
-    run(c, f"""cd {REMOTE_ROOT} && python3 -c "
-import sys; sys.path.insert(0, '.')
-from petcar.core.llm_backends import MockBackend
-from petcar.core.chat_agent import ChatAgent
-from petcar.core.skill_manager import SkillManager
-from petcar.skills.emote import EmoteSkill
-sm = SkillManager()
-sm.register(EmoteSkill(None))
-chat = ChatAgent(backend=MockBackend(), skill_manager=sm)
-for q in ['你好', '开心一下', '帮我追踪我', '你是谁']:
-    r = chat.chat(q)
-    print(f'  你: {{q}}')
-    print(f'  小宝({{r.emotion}}): {{r.reply}}')
-" """, timeout=30)
-
-    # Test C: Ollama + petcar ChatAgent
-    print("\n  --- Test C: petcar ChatAgent + Ollama ---")
+    # Test B: petcar ChatAgent + Ollama
+    print("\n  --- Test B: petcar ChatAgent + Ollama ---")
     run(c, f"""cd {REMOTE_ROOT} && PETCAR_LLM_BACKEND=ollama python3 -c "
 import sys; sys.path.insert(0, '.')
 from petcar.core.chat_agent import ChatAgent
 from petcar.core.llm_backends import create_llm_backend
 from petcar.core.skill_manager import SkillManager
-from petcar.skills.emote import EmoteSkill, WeatherSkill, MoveSkill
+from petcar.skills.emote import EmoteSkill
+from petcar.skills.weather import WeatherSkill
+from petcar.skills.move import MoveSkill
 sm = SkillManager()
 sm.register(EmoteSkill(None))
 sm.register(WeatherSkill())
@@ -192,12 +177,12 @@ print(f'  reply: {{r.reply}}')
 print(f'  tools: {{r.tools_called}}')
 " """, timeout=90)
 
-    # Test D: OLED 硬件检测
-    print("\n  --- Test D: OLED I2C 扫描 ---")
+    # Test C: OLED 硬件检测
+    print("\n  --- Test C: OLED I2C 扫描 ---")
     run(c, "i2cdetect -y 1 2>/dev/null || echo NO_I2C_DETECT")
     run(c, f"""cd {REMOTE_ROOT} && timeout 5 python3 -c "
 import sys; sys.path.insert(0, '.')
-from petcar.drivers.oled import OLEDDriver, MockOLEDDriver
+from petcar.drivers.oled import OLEDDriver
 try:
     drv = OLEDDriver(address=0x3C)
     drv.show_expression('happy')

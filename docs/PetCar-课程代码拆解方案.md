@@ -4,13 +4,15 @@
 > 配套文档：[PetCar-12节课课程设计方案](./PetCar-12节课课程设计方案.md)
 > 代码落点：`e:\work\AITank\lessons\`（新增，不修改 `petcar/`）
 
+> **现状说明**：本文是 `lessons/` 教学代码的拆分方案，`lessons/` 尚未落地；文中所有 mock 均指**规划中的教学测试替身**，不代表 PetCar 现有能力。`petcar/` 本体已移除 mock 运行方式（`--mock`、`--rules`、`PETCAR_ASR_MODE=mock`、`MockBackend`、`MockOLEDDriver`、TTS mock 均已删除），只能在树莓派真机上运行。
+
 ---
 
 ## 0. 结论摘要
 
 1. **拆的是"能力切片"，不是"目录层级"。** 不能把 `drivers/`、`core/`、`api/` 原样搬出来，那只是把大框架换成小框架，学生仍然要读工程代码。正确切法是按课堂现象切：会动、会看、会说、会想、会组合。
 2. **采用"一个小驱动库 + 一课一脚本"的结构。** 公用硬件代码压到 `lessons/lib/`（约 1100 行，9 个模块），每节课的脚本只有 40–100 行，学生一眼能读完、改得动。
-3. **每节课的代码必须满足三条硬指标**：能独立运行、10 秒内看到现象、在电脑上无硬件也能跑（mock）。
+3. **每节课的代码必须满足三条硬指标**：能独立运行、10 秒内看到现象、在目标树莓派上可运行（PetCar 本体已不提供无硬件 mock）。
 4. **课程脚本不 import petcar。** `petcar/` 只作为算法和参数的"母本"，`lessons/` 是抽出来的最小可读版本。
 5. **现有 `labs/` 不动。** 它是底层原理实验，课程主线另建 `lessons/`，两者定位不同。
 
@@ -36,7 +38,7 @@
 - Flask、REST、SSE、前端静态资源
 - `runtime_config`、技能注册表、`SkillManager`、`EmotionEngine` 后台线程
 - 日志系统、异常兜底、多实例锁
-- 为产品服务的兼容分支、降级链（只保留课堂需要的一条主路径 + mock）
+- 为产品服务的兼容分支、降级链（只保留课堂需要的一条主路径 + 教学测试替身）
 
 **保留：**
 
@@ -144,8 +146,8 @@ lessons/
 | `camera_min.py` | `drivers/camera.py` | 打开、取一帧、拍照保存 | 60 | 后台取帧线程、追踪线程 |
 | `vision_min.py` | `drivers/detectors.py` + `camera.detect_faces` | HSV 颜色检测、网球检测、YuNet/Haar 人脸检测 | 90 | TFLite/NanoDet 模型加载 |
 | `pid_min.py` | `core/pid_tracker.py` | `PID` 类、误差→角度增量、死区、限幅 | 35 | 后台追踪线程、SSE 状态 |
-| `speech_min.py` | `drivers/tts.py` + `drivers/asr.py` | `speak()` 三种模式、`listen_once()` 一次录音识别 | 100 | 常驻进程、VAD 调参面板 |
-| `llm_min.py` | `core/llm_backends.py` + `core/chat_agent.py` | Ollama HTTP 调用、system prompt、工具调用解析、mock 规则 | 90 | 多后端抽象、历史裁剪、情绪引擎 |
+| `speech_min.py` | `drivers/tts.py` + `drivers/asr.py` | `speak()` 多种模式、`listen_once()` 一次录音识别 | 100 | 常驻进程、VAD 调参面板 |
+| `llm_min.py` | `core/llm_backends.py` + `core/chat_agent.py` | Ollama HTTP 调用、system prompt、工具调用解析、本地规则短路 | 90 | 多后端抽象、历史裁剪、情绪引擎 |
 | `robot_min.py` | `student_api/emoji_robot.py` | 组合门面：表情/动作/云台/说话/拍照/检测/对话 | 110 | 硬件连接管理、单例 |
 
 **统一接口约定：**
@@ -164,11 +166,12 @@ if __name__ == "__main__":
     main()
 ```
 
-**统一 mock 策略：**
+**统一测试替身策略（仅规划中的 lessons/，PetCar 本体没有 mock）：**
 
 - 优先读环境变量 `PETCAR_LESSON_MOCK=1`；
-- 没有该变量时，尝试真实硬件，导入失败自动降级 mock 并打印一行提示；
-- mock 必须打印"本应发生什么"，例如 `[MOCK] 前进 1.0 秒`、`[MOCK] 人脸中心 (320,240)`。
+- 没有该变量时，尝试真实硬件，导入失败自动降级到教学测试替身并打印一行提示；
+- 测试替身必须打印"本应发生什么"，例如 `[MOCK] 前进 1.0 秒`、`[MOCK] 人脸中心 (320,240)`。
+- `lessons/` 尚未落地，以上开关目前不可用；PetCar 本体只能真机运行。
 
 ---
 
@@ -312,7 +315,7 @@ if __name__ == "__main__":
 ==========================
 知识点: RGB/HSV、阈值、掩膜、轮廓、中心坐标
 运行:   python3 lesson04_color/main.py
-        PETCAR_LESSON_MOCK=1 python3 lesson04_color/main.py   # 无硬件
+        PETCAR_LESSON_MOCK=1 python3 lesson04_color/main.py   # 规划中的无硬件模式
 现象:   终端持续打印最大色块中心 (cx, cy)，面积大于 300 才输出
 改这里: HSV_MIN / HSV_MAX / MIN_AREA
 """
@@ -358,7 +361,7 @@ SERVO_GAIN = 0.04
 
 1. 建 `lessons/` 目录、`lib/` 空模块、`run.py`、`check_env.py`。
 2. 定接口：把第 3 节表格里的类和方法签名先写出来，方法体留 `pass`。
-3. 写 mock：所有模块都能在无硬件时返回假数据。
+3. 写测试替身：所有模块都能在无硬件时返回假数据。
 4. 写冒烟脚本：12 个 `main.py` 先只打印"第 X 课待实现"，确保目录结构可用。
 
 **完成标志**：`python3 run.py` 能列出 12 课；`check_env.py` 能报告各项硬件状态。
@@ -366,7 +369,7 @@ SERVO_GAIN = 0.04
 ### 阶段 P1：抽基础驱动（第 1、2、6、7 课依赖）
 
 1. `motor_min.py`、`servo_min.py`、`oled_min.py`、`faces.py`、`camera_min.py`。
-2. 每抽一个，先在 PC mock 下跑通，再上板验证。
+2. 每抽一个，先在 PC 测试替身下跑通，再上板验证。
 3. 同步写第 1、2、6、7 课脚本。
 
 **完成标志**：4 节课的代码在 PC 和板上都能跑，现象与第 4 节表格一致。
@@ -389,7 +392,7 @@ SERVO_GAIN = 0.04
 
 ### 阶段 P4：联调、打包、与教案对齐
 
-1. 跑完 12 课的 PC mock 测试矩阵。
+1. 跑完 12 课的 PC 测试替身矩阵。
 2. 上板跑完 12 课的真实硬件测试。
 3. 每课文件头补齐"课次/知识点/运行/现象"。
 4. 打包 `lessons/` 为教师分发包，附 `requirements.txt` 与排障说明。
@@ -400,7 +403,7 @@ SERVO_GAIN = 0.04
 
 每节课至少两条测试：
 
-| 课次 | PC mock 预期 | 板上预期 | 安全检查 |
+| 课次 | PC 测试替身预期 | 板上预期 | 安全检查 |
 |---|---|---|---|
 | 1 | 终端打印五步动作 | 屏幕/声音/运动依次出现 | 1 秒后自动停 |
 | 2 | 打印表情名 | OLED 表情切换 | 无运动 |
@@ -412,7 +415,7 @@ SERVO_GAIN = 0.04
 | 8 | 打印积木执行顺序 | 真实执行 | 急停可用 |
 | 9 | 打印状态机 | 自主巡逻并停下 | 超时停车 |
 | 10 | 打印方法调用 | 与积木版一致 | 急停可用 |
-| 11 | 打印 mock 回复 | 模型真实回复 | 运动限时 |
+| 11 | 打印测试替身回复 | 模型真实回复 | 运动限时 |
 | 12 | 打印项目主循环 | 学生作品可运行 | 退出即停 |
 
 建议做一个 `tests/smoke_test.py`，用 `PETCAR_LESSON_MOCK=1` 依次运行 12 课，检查退出码和关键字输出。
@@ -438,7 +441,7 @@ SERVO_GAIN = 0.04
 | 抽取后与 petcar 脱节 | petcar 改了算法，课程代码还是旧的 | 每个抽取文件头记录来源与日期；每学期用冒烟测试校对一次 |
 | 驱动代码重复 | 12 课各复制一份 motor 代码 | 统一放 `lib/`，课程脚本只 import |
 | 学生读不懂 lib | `lib` 仍然太长 | 每课只要求读本课 `main.py`；lib 作为"黑盒工具"，第 10 课后再讲 |
-| mock 与真实行为差异大 | 电脑上好好的，板上不动 | mock 只打印状态，不模拟时序；板上必须实测 |
+| 测试替身与真实行为差异大 | 电脑上好好的，板上不动 | 测试替身只打印状态，不模拟时序；板上必须实测 |
 | 硬件差异 | 不同批次接线/舵机方向不同 | `board.py` 集中放引脚与方向常量；提供 `check_env.py` 自检 |
 | 课程脚本膨胀 | 越写越长，回到"小框架" | 单文件超过 120 行必须拆分或删功能 |
 | 积木解释器过度设计 | `mini_vm` 变成第二个 block runtime | 只支持 6 种积木，不支持下变量、函数、并发 |
@@ -449,7 +452,7 @@ SERVO_GAIN = 0.04
 
 - [ ] `lessons/` 可整体拷贝到另一块树莓派直接运行，不依赖 `petcar/`。
 - [ ] 12 节课的 `main.py` 均在 120 行以内，文件头信息完整。
-- [ ] 12 节课在 `PETCAR_LESSON_MOCK=1` 下全部跑通。
+- [ ] lessons 落地后，12 节课在测试替身模式下全部跑通（PetCar 本体已移除 mock，只能真机验证）。
 - [ ] 12 节课在目标板卡上全部跑通，现象与第 4 节表格一致。
 - [ ] `lib/` 每个模块不超过 120 行，且有来源注释。
 - [ ] `check_env.py` 能报告 I2C、摄像头、音频、模型、板卡五项状态。

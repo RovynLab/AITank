@@ -102,7 +102,7 @@
 1. **Skill 与 LLM 解耦** — SkillManager 只认 `name` 字符串，不管这个 `name` 是 ChatAgent 通过 LLM 拿到的，还是正则匹配拿到的，还是面板 `/api/skill/run` 直接调的
 2. **一条 Skill，两种描述** — 每个 Skill 同时有"纯文本描述"（给 system prompt 里的小模型看）和"OpenAI function schema"（走原生 function calling）
 3. **执行结果是纯字符串** — Skill.execute() 返回 str，LLM 下一轮会把它当 tool result 看，然后决定最终回复
-4. **所有硬件调用必须容错** — Skill 内部对 `driver is None` 和异常都要返回 Mock 或友好的提示字符串，不能让整个 ChatAgent 崩溃
+4. **所有硬件调用必须容错** — Skill 内部对 `driver is None` 和异常都要返回友好提示字符串，不能让整个 ChatAgent 崩溃
 
 ---
 
@@ -242,13 +242,12 @@ class LLMBackend(ABC):
         """
 ```
 
-三个实现：
+两个实现（当前版本已移除 MockBackend）：
 
-| Backend | 类 | 解析 tool_calls | 降级 |
+| Backend | 类 | 解析 tool_calls | 不可用时 |
 |---------|-----|-----------------|------|
-| Ollama | `OllamaBackend` | `msg["tool_calls"]` → `json.loads(func["arguments"])` | 连不上 → MockBackend |
-| Doubao | `DoubaoBackend` | `choices[0]["message"]["tool_calls"]` | 没配 Key → MockBackend |
-| Mock | `MockBackend` | 正则匹配本地 RULES → 假造 tool_calls | 兜底 |
+| Ollama | `OllamaBackend` | `msg["tool_calls"]` → `json.loads(func["arguments"])` | 对话直接报错 |
+| Doubao | `DoubaoBackend` | `choices[0]["message"]["tool_calls"]` | 没配 Key 时对话直接报错 |
 
 ---
 
@@ -266,7 +265,7 @@ class LLMBackend(ABC):
 
 **为什么有这个？** qwen2.5:0.5b 这种小模型不一定稳定输出 OpenAI function calling 格式的 `tool_calls` 字段。但固定动作指令（"摇头"、"转圈"）用正则 100% 能命中，且执行时间 < 1ms，比走 LLM（3~10s）快得多。
 
-**注意**：这里的 `_LOCAL_RULES` 和 `MockBackend.RULES` 是**两份几乎相同的正则匹配表**，分别在 ChatAgent 和 MockBackend 里。ChatAgent 的版本只做"本地短路"（不给 LLM 看），MockBackend 的版本会构造假的 tool_calls 返回给 ChatAgent（走完整 function calling 链路）。
+**注意**：`_LOCAL_RULES` 是当前唯一的本地正则表，位于 `ChatAgent` 内，只做“本地短路”（不给 LLM 看）。当前版本已没有 `MockBackend`，不存在两份规则表。
 
 ### 通道 B：LLM 原生 function calling（主力通道）
 
@@ -464,7 +463,7 @@ class XxxSkill(BaseSkill):
     def execute(self, param1: str, param2: float = 2.0) -> str:
         """执行, 返回给 LLM 的纯字符串结果"""
         if self.driver is None:
-            return f"(Mock) 好的, 我{param1}..."     # ← Mock 模式也能跑
+            return "硬件不可用，暂时做不到哦"          # ← 驱动缺失时给友好提示
         try:
             self.driver.do_something(param1)
             return f"好的, 已{param1}!"               # ← 成功路径
@@ -500,7 +499,7 @@ sm.register(EmoteSkill(emotion))
 sm.register(ExpressSkill(action_player))
 ```
 
-注册**没有先后依赖**——SkillManager 只是往 `_skills` 字典里塞，不做初始化检查。但**每个 Skill 的 execute() 内部要自己检查依赖是否为 None**（走 Mock 降级）。
+注册**没有先后依赖**——SkillManager 只是往 `_skills` 字典里塞，不做初始化检查。但**每个 Skill 的 execute() 内部要自己检查依赖是否为 None**（返回友好提示，不要抛异常）。
 
 ---
 
@@ -644,11 +643,13 @@ _LOCAL_RULES = [
 4. **parameters.required 对吗**？required 里列的参数，LLM 会尝试都填上；留空 `{}` 表示没有必填参数
 5. **Ollama 重启了吗**？Ollama 是有状态的，新工具加载可能需要 Ollama 进程重启
 
-### Q3: Skill 返回 Mock 字符串会不会有问题？
+### Q3: Skill 里 driver 为 None 时返回什么？
 
-不会。`return "(Mock) 好的, 我xxx..."` 这样的字符串：
-- 通道 A（本地规则短路）：直接作为 reply 返回给用户，用户能看到 "(Mock)" 前缀，知道没连硬件
-- 通道 B（function calling）：tool result 会被 LLM 当普通文本看，LLM 会把它组织进最终回复
+返回一句友好提示，例如 `"硬件不可用，暂时做不到哦"`：
+- 通道 A（本地规则短路）：直接作为 reply 返回给用户；
+- 通道 B（function calling）：tool result 会被 LLM 当普通文本看，LLM 会把它组织进最终回复。
+
+当前版本没有 mock 驱动，也没有 `"(Mock)"` 前缀的特殊语义。
 
 ### Q4: 同一个 skill 能被同时执行多次吗？
 
@@ -669,15 +670,13 @@ class XxxSkill(BaseSkill):
             ...
 ```
 
-### Q5: ChatAgent 里的 _LOCAL_RULES 和 MockBackend.RULES 为什么有两份？
+### Q5: `ChatAgent._LOCAL_RULES` 和 LLM 的边界在哪？
 
-这是一个已知设计缺陷（见 [迭代路线图 P2-10](file:///e:/work/AITank/docs/AI-PetCar迭代路线图与优化方案.md)）。当前：
-- ChatAgent._LOCAL_RULES 是"不经过 LLM 的快速短路"——命中就直接 `skills.execute()` 返回
-- MockBackend.RULES 是"LLM 后端返回假 tool_calls"——走完整 function calling 链路
+当前版本只有 `ChatAgent._LOCAL_RULES` 一份本地规则（`MockBackend` 已删除）：
+- 命中本地规则：不经过 LLM，直接 `skills.execute()` 返回；
+- 未命中：进入 LLM + function calling 循环。
 
-两者有重叠但不完全相同（MockBackend 多了一条"追踪我"、MockBackend 还包含表情规则的 tool_call）。
-
-**建议未来**：抽一份公共 `SKILL_RULES` 定义，两处共用。改一处即可。
+本地规则存在的价值：0.5B 小模型的 `tool_calls` 不稳定，而“摇头”“转圈”这类固定指令用正则 100% 能命中，且比走 LLM 快得多。
 
 ### Q6: 一个 skill 的 execute() 能再调另一个 skill 吗？
 

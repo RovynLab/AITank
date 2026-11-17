@@ -1496,11 +1496,6 @@ function syncVoiceBadges(v) {
     aw.className = 'warn-line show';
     aw.textContent = '后端没有启用语音识别，检查启动参数里是否带了 --voice。';
     btn.disabled = true;
-  } else if (v.asr === 'mock') {
-    ab.className = 'badge warn'; ab.textContent = 'mock 模式';
-    aw.className = 'warn-line show';
-    aw.textContent = '当前是 mock 模式，不会真的收音。请用 python run_petcar.py --voice 启动后刷新本页。';
-    btn.disabled = true;
   } else {
     ab.className = 'badge ok'; ab.textContent = `whisper · 本地识别`;
     aw.className = 'warn-line'; aw.textContent = '';
@@ -1509,7 +1504,6 @@ function syncVoiceBadges(v) {
 
   const tb = $('tts-badge');
   if (!v.tts) { tb.className = 'badge warn'; tb.textContent = '未连接'; }
-  else if (v.tts === 'mock') { tb.className = 'badge warn'; tb.textContent = 'mock 模式'; }
   else { tb.className = 'badge ok'; tb.textContent = v.tts; }
 }
 
@@ -1695,6 +1689,30 @@ api('/api/track').then(pidSync).catch(() => {});
 pollStatus(); pollLogs(); loadActions();
 setInterval(pollStatus, 1000);
 setInterval(pollLogs, 1500);
+
+// —— 积木页视频活跃 → 中控面板自动暂停自己的视频, 省带宽/CPU ——
+(function blockVideoGuard() {
+  let paused = false;
+  setInterval(async () => {
+    try {
+      const r = await fetch('/api/blocks/view');
+      const j = await r.json();
+      const shouldPause = !!j.blocks_video_active;
+      if (shouldPause && !paused) {
+        paused = true;
+        const v = $('video-img');
+        if (v && v.src) { v.dataset.paused = v.src; v.src = ''; }
+      } else if (!shouldPause && paused) {
+        paused = false;
+        const v = $('video-img');
+        if (v && v.dataset.paused) {
+          v.src = v.dataset.paused + '?t=' + Date.now();
+          delete v.dataset.paused;
+        }
+      }
+    } catch (e) {}
+  }, 2500);
+})();
 </script>
 </body>
 </html>

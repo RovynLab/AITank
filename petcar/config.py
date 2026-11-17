@@ -52,7 +52,7 @@ OLED_HEIGHT = 64
 # LLM 配置
 # ============================================================================
 LLM_BACKEND = os.environ.get("PETCAR_LLM_BACKEND", "ollama")
-# 选项: "ollama" | "doubao" | "tongyi" | "mock"
+# 选项: "ollama" | "doubao"
 
 OLLAMA_HOST = os.environ.get("PETCAR_OLLAMA_HOST", "http://localhost:11434")
 OLLAMA_MODEL = os.environ.get("PETCAR_OLLAMA_MODEL", "qwen2.5:0.5b")
@@ -80,10 +80,13 @@ STARTUP_GREETING = os.environ.get(
 # ============================================================================
 # ASR 配置
 # ============================================================================
-ASR_MODE = os.environ.get("PETCAR_ASR_MODE", "whisper")
-# 选项: "whisper" | "porcupine" | "mock"
+# whisper 已拆成独立 systemd 服务 (aitank-whisper), 模型在开机时预加载.
+# 下面的 WHISPER_SERVICE_URL 是该服务的 HTTP 地址, petcar 通过它发 wav 请求识别.
+# 模型名称 (tiny/base/small/medium) 不再在 config.py 里, 而是在
+#   /etc/systemd/system/aitank-whisper.service 的 Environment=WHISPER_MODEL=
+# 里指定, 或用环境变量覆盖.
 
-WHISPER_MODEL = os.environ.get("PETCAR_WHISPER_MODEL", "small")
+WHISPER_SERVICE_URL = os.environ.get("PETCAR_WHISPER_URL", "http://127.0.0.1:8091")
 WHISPER_LANG  = "zh"
 
 # 唤醒词默认带上宠物名字
@@ -102,7 +105,7 @@ VAD_SILENCE_MS    = int(os.environ.get("PETCAR_VAD_SILENCE_MS", "1200"))
 # ============================================================================
 TTS_MODE = os.environ.get("PETCAR_TTS_MODE", "edge")
 # 选项: "edge" (云端童声, 需联网, 失败自动降级 piper) | "piper" (本地离线童声)
-#       | "espeak" | "pyttsx3" | "mock"
+#       | "espeak" | "pyttsx3"
 
 # ALSA 播放设备，如 plughw:CARD=UACDemoV10,DEV=0；留空则自动探测 USB 声卡
 TTS_DEVICE = os.environ.get("PETCAR_TTS_DEVICE", "")

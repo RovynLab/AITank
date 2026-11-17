@@ -1,0 +1,47 @@
+{
+  "blocks": {
+    "languageVersion": 0,
+    "blocks": [{
+      "type": "event_start",
+      "id": "start",
+      "x": 40, "y": 40,
+      "next": {
+        "block": {
+          "type": "color_track_start",
+          "id": "track1",
+          "fields": { "COLOR": "red" },
+          "next": {
+            "block": {
+              "type": "forever",
+              "id": "loop1",
+              "inputs": {
+                "DO": {
+                  "block": {
+                    "type": "if_sees_color",
+                    "id": "if1",
+                    "fields": { "COLOR": "red" },
+                    "inputs": {
+                      "DO": {
+                        "block": {
+                          "type": "move_for",
+                          "id": "mv1",
+                          "fields": { "DIR": "forward", "SPEED": 100, "SECONDS": 0.3 }
+                        }
+                      },
+                      "ELSE": {
+                        "block": {
+                          "type": "move_stop",
+                          "id": "stop1"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }]
+  }
+}

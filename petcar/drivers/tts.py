@@ -2,7 +2,7 @@
 """
 drivers/tts.py — 语音合成 (TTS)
 =================================
-五种实现: edge (云端童声), piper (本地离线童声), espeak, pyttsx3, mock
+四种实现: edge (云端童声), piper (本地离线童声), espeak, pyttsx3
 """
 
 from __future__ import annotations
@@ -40,6 +40,12 @@ class TTSDriver:
         self._piper_ok = False
         self._piper_rate = 22050
 
+        # 正在运行的子进程 (播放中), 用于 stop() 统一杀
+        self._procs_lock = threading.Lock()
+        self._procs: list[subprocess.Popen] = []
+        # 外部 stop 请求标记
+        self._stop_requested = threading.Event()
+
         if mode == "edge":
             self._init_edge()
         elif mode == "piper":
@@ -50,11 +56,10 @@ class TTSDriver:
                 print(f"[TTS] 播放设备: {self._play_device or '系统默认'}")
         elif mode == "pyttsx3":
             self._init_pyttsx3()
-        elif mode == "mock":
-            print("[TTS] Mock 模式 (只打印文本)")
         else:
-            print(f"[TTS] 未知模式 {mode}, 退回 mock")
-            self.mode = "mock"
+            print(f"[TTS] 未知模式 {mode}, 改用 espeak")
+            self.mode = "espeak"
+            self._test_espeak()
 
     def _test_espeak(self):
         try:
@@ -62,8 +67,7 @@ class TTSDriver:
                                     capture_output=True, text=True, timeout=5)
             print(f"[TTS] espeak 可用: {result.stdout.strip()[:60]}")
         except (FileNotFoundError, subprocess.TimeoutExpired):
-            print("[TTS] espeak 未安装, 退回 mock (sudo apt install espeak)")
-            self.mode = "mock"
+            print("[TTS] espeak 未安装 (sudo apt install espeak)")
 
     def _init_edge(self):
         try:
@@ -127,20 +131,38 @@ class TTSDriver:
             return 22050
 
     def _speak_piper(self, text: str) -> bool:
-        """离线合成并播放; 失败返回 False"""
+        """离线合成并播放; 失败返回 False。每步都检查 _stop_requested —— stop() 能打断"""
         if not self._piper_ready():
+            return False
+        if self._stop_requested.is_set():
             return False
         with self._piper_lock:
             try:
                 if self._piper_proc is None or self._piper_proc.poll() is not None:
                     self._start_piper_pipeline()
+                if self._stop_requested.is_set():
+                    return False
                 self._piper_proc.stdin.write((text + "\n").encode("utf-8"))
                 self._piper_proc.stdin.flush()
-                # piper 合成完会把 wav 路径打到 stdout (没有输出即失败)
-                line = self._piper_proc.stdout.readline()
+                # piper 合成完把 wav 路径打到 stdout —— 用短超时循环读, 能被 stop 打断
+                line = b""
+                while True:
+                    if self._stop_requested.is_set():
+                        return False
+                    try:
+                        line = self._piper_proc.stdout.readline()
+                    except Exception:
+                        return False
+                    if line:
+                        break
+                    time.sleep(0.05)
+                if self._stop_requested.is_set():
+                    return False
                 wav = line.decode("utf-8", errors="replace").strip()
                 if not wav or not os.path.exists(wav):
                     print(f"[TTS] piper 未输出音频: {wav[:60]}")
+                    return False
+                if self._stop_requested.is_set():
                     return False
                 self._play_piper_wav(wav)
                 return True
@@ -150,17 +172,37 @@ class TTSDriver:
                 return False
 
     def _play_piper_wav(self, path: str):
-        """原 wav 音调提升 (童声化) 后播放, 播完删除临时文件"""
+        """原 wav 音调提升 (童声化) 后播放, 播完删除临时文件。童声转换 ffmpeg 也注册进 _procs"""
         rate = self._piper_rate
         pitch = config.PIPER_PITCH
         kid = path.replace(".wav", "_kid.wav")
         try:
+            if self._stop_requested.is_set():
+                return
             af = (f"asetrate={rate}*{pitch},aresample=44100,atempo={1.0 / pitch:.4f}"
                   if pitch and pitch != 1.0 else "anull")
-            subprocess.run(
+            ff = subprocess.Popen(
                 ["ffmpeg", "-y", "-loglevel", "error", "-i", path,
                  "-af", af, "-ar", "44100", kid],
-                check=True, capture_output=True, timeout=60)
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            with self._procs_lock:
+                self._procs.append(ff)
+            try:
+                _, err = ff.communicate(timeout=60)
+            except subprocess.TimeoutExpired:
+                ff.kill()
+                ff.wait()
+                raise RuntimeError("piper 童声转换超时")
+            finally:
+                with self._procs_lock:
+                    try:
+                        self._procs.remove(ff)
+                    except ValueError:
+                        pass
+            if ff.returncode != 0:
+                raise RuntimeError(err.decode(errors="replace").strip() or "ffmpeg 童声化失败")
+            if self._stop_requested.is_set():
+                return
             self._play_audio_file(kid)
         finally:
             for p in (path, kid):
@@ -189,8 +231,9 @@ class TTSDriver:
             self.mode = "espeak"
             self._test_espeak()
         except Exception as e:
-            print(f"[TTS] pyttsx3 初始化失败 ({e}), 退回 mock")
-            self.mode = "mock"
+            print(f"[TTS] pyttsx3 初始化失败 ({e}), 改用 espeak")
+            self.mode = "espeak"
+            self._test_espeak()
 
     def _resolve_play_device(self) -> str:
         """决定用哪个 ALSA 设备播放: 配置优先, 否则自动找 USB 声卡 / 板载耳机口"""
@@ -222,57 +265,94 @@ class TTSDriver:
             self._test_espeak()
         elif self.mode == "pyttsx3":
             self._init_pyttsx3()
-        elif self.mode == "mock":
-            print("[TTS] Mock 模式 (只打印文本)")
         else:
-            print(f"[TTS] 未知模式 {self.mode}, 退回 mock")
-            self.mode = "mock"
+            print(f"[TTS] 未知模式 {self.mode}, 改用 espeak")
+            self.mode = "espeak"
+            self._test_espeak()
 
     # ========================================================================
     def speak(self, text: str, emotion: str = "neutral"):
-        """同步播放语音"""
+        """同步播放语音。每个阶段开头检查 _stop_requested —— stop() 能立刻打断"""
         if not text:
             return
-        # 截断避免说太长
         text = text[:100]
 
+        self._stop_requested.clear()
         self._speaking.set()
         try:
+            if self._stop_requested.is_set():
+                return
             if self.mode == "edge":
                 # 云端童声 → 断网/超时降级本地 piper → 最后才用 espeak
                 if not self._speak_edge(text) and not self._speak_piper(text):
-                    self._speak_espeak(text)
+                    if not self._stop_requested.is_set():
+                        self._speak_espeak(text)
             elif self.mode == "piper":
                 if not self._speak_piper(text):
-                    self._speak_espeak(text)
+                    if not self._stop_requested.is_set():
+                        self._speak_espeak(text)
             elif self.mode == "espeak":
                 self._speak_espeak(text)
             elif self.mode == "pyttsx3":
                 self._speak_pyttsx3(text)
-            elif self.mode == "mock":
-                print(f"[TTS Mock] ({emotion}) {text}")
         finally:
             self._speaking.clear()
 
     def is_speaking(self) -> bool:
-        """是否正在播放 (语音识别期间要避开, 否则会把自己的声音当用户)"""
         return self._speaking.is_set()
 
     def speak_async(self, text: str, emotion: str = "neutral"):
-        """异步播放 (后台线程)"""
         threading.Thread(target=self.speak, args=(text, emotion),
                          daemon=True).start()
 
+    def stop(self):
+        """立即打断所有正在播放的语音 —— 停积木程序时调用。
+        1) 置 _stop_requested 让 speak 各阶段主动退出
+        2) 杀所有子进程 (ffmpeg / aplay / espeak / piper 管线宿主)
+        3) pyttsx3 特殊处理"""
+        self._stop_requested.set()
+        # 杀所有注册的子进程
+        with self._procs_lock:
+            for p in list(self._procs):
+                try:
+                    if p.poll() is None:
+                        p.kill()
+                except Exception:
+                    pass
+            self._procs.clear()
+        # piper 管线宿主 —— 直接杀掉, 下次 speak 重启即可; wait() 清僵尸
+        if self._piper_proc is not None:
+            try:
+                if self._piper_proc.poll() is None:
+                    self._piper_proc.kill()
+                self._piper_proc.wait(timeout=1)
+            except Exception:
+                pass
+            self._piper_proc = None
+        # pyttsx3 特殊处理
+        if self._engine is not None and self.mode == "pyttsx3":
+            try:
+                self._engine.stop()
+            except Exception:
+                pass
+
     # ========================================================================
     def _speak_edge(self, text: str) -> bool:
-        """云端童声合成并播放; 失败返回 False, 交给 espeak 兜底"""
+        """云端童声合成并播放; 失败返回 False"""
         key = hashlib.md5(
             f"{config.TTS_VOICE}|{config.TTS_PITCH}|{text}".encode("utf-8")
         ).hexdigest()[:16]
         mp3 = os.path.join(tempfile.gettempdir(), f"petcar_tts_{key}.mp3")
         try:
             if not os.path.exists(mp3):
-                asyncio.run(self._edge_save(text, mp3))
+                # 断网时 edge-tts 可能卡, 限制 8s 让上层快速降级到 piper
+                try:
+                    asyncio.run(asyncio.wait_for(
+                        self._edge_save(text, mp3), timeout=8))
+                except asyncio.TimeoutError:
+                    return False
+            if self._stop_requested.is_set():
+                return False
             self._play_audio_file(mp3)
             return True
         except Exception as e:
@@ -289,7 +369,7 @@ class TTSDriver:
             timeout=config.EDGE_TIMEOUT)
 
     def _play_audio_file(self, path: str):
-        """ffmpeg 解码 → aplay 输出到指定设备"""
+        """ffmpeg 解码 → aplay 输出到指定设备；子进程注册进 _procs 供 stop() 杀"""
         ffmpeg = subprocess.Popen(
             ["ffmpeg", "-y", "-loglevel", "error", "-i", path, "-f", "wav", "-"],
             stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
@@ -297,7 +377,22 @@ class TTSDriver:
         aplay = subprocess.Popen(cmd, stdin=ffmpeg.stdout,
                                  stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
         ffmpeg.stdout.close()
-        _, err = aplay.communicate(timeout=60)
+        # 注册
+        with self._procs_lock:
+            self._procs.extend([ffmpeg, aplay])
+        try:
+            _, err = aplay.communicate(timeout=60)
+        except subprocess.TimeoutExpired:
+            aplay.kill()
+            ffmpeg.kill()
+            raise
+        finally:
+            with self._procs_lock:
+                for p in (ffmpeg, aplay):
+                    try:
+                        self._procs.remove(p)
+                    except ValueError:
+                        pass
         ffmpeg.wait(timeout=10)
         if aplay.returncode != 0:
             raise RuntimeError(err.decode(errors="replace").strip() or "aplay 失败")
@@ -322,7 +417,21 @@ class TTSDriver:
                                      stdout=subprocess.DEVNULL,
                                      stderr=subprocess.PIPE)
             espeak.stdout.close()
-            _, err = aplay.communicate(timeout=30)
+            with self._procs_lock:
+                self._procs.extend([espeak, aplay])
+            try:
+                _, err = aplay.communicate(timeout=30)
+            except subprocess.TimeoutExpired:
+                aplay.kill()
+                espeak.kill()
+                raise
+            finally:
+                with self._procs_lock:
+                    for p in (espeak, aplay):
+                        try:
+                            self._procs.remove(p)
+                        except ValueError:
+                            pass
             espeak.wait(timeout=5)
             if aplay.returncode != 0:
                 print(f"[TTS] aplay 播放失败 ({self._play_device}): "
@@ -340,6 +449,6 @@ class TTSDriver:
 
 if __name__ == "__main__":
     print("测试 TTS...")
-    tts = TTSDriver(mode="mock")
+    tts = TTSDriver(mode="espeak")
     tts.speak(f"你好呀，我是{config.PET_NAME}！")
     tts.speak("今天天气怎么样？", emotion="happy")

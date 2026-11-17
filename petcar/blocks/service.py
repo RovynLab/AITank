@@ -71,8 +71,17 @@ class BlockService:
             runner = ProgramRunner(ir, self.runtime, self, self.max_runtime)
             self._runner = runner
 
+        # 按需配置感知（哪些颜色）
+        used_colors = ir.get("used_colors") or []
+        self.runtime.set_needed_colors(used_colors)
         self.runtime.start_perception()
+        # 颜色追踪仲裁：若中控 PID 在追同一目标，让积木接管
+        if self.runtime.pid_tracker_running():
+            self.runtime.stop_pid_tracker(arbitrate=True)
+            self.log("info", "中控追踪已停止，积木接管云台")
         self.log("info", f"开始运行，共 {ir.get('block_count', 0)} 块积木")
+        if used_colors:
+            self.log("info", f"程序用到颜色: {', '.join(used_colors)}")
         runner.start()
         return {
             "run_id": self._run_id,
@@ -84,6 +93,12 @@ class BlockService:
             runner = self._runner
         if runner is not None:
             runner.cancel_event.set()
+
+        # 立即打断 TTS（声音走的是后台线程 + ffmpeg|aplay 管道，不等解释器慢慢走到 finally）
+        try:
+            self.runtime.stop_tts()
+        except Exception:
+            pass
 
         if estop:
             self.runtime.emergency_stop()
@@ -121,6 +136,35 @@ class BlockService:
     def shutdown(self):
         self.stop()
         self.runtime.shutdown()
+
+    def program_annotator_keys(self) -> set:
+        """积木运行期间自动启用哪些视频 annotator tag。
+        视频流 MJPEG 绘制时会检查这个集合, 不依赖面板手动开关。"""
+        keys = set()
+        ir = self._runner.ir if self._runner is not None else None
+        if ir is None:
+            return keys
+        # 遍历所有 op
+        def _walk(nodes):
+            for n in nodes or []:
+                op = n.get("op")
+                if op == "if_sees" and n.get("target") == "face":
+                    keys.add("face")
+                elif op == "if_sees" and n.get("target") == "tennis":
+                    keys.add("tennis")
+                elif op in ("if_sees_color", "color_track_start"):
+                    keys.add("color")
+                for k in ("body", "else"):
+                    _walk(n.get(k))
+        for hat in ir.get("hats", []):
+            _walk(hat.get("body"))
+        # 映射到 annotator dict 里的 key
+        _map = {
+            "face": "face",       # 旧 if_sees 人脸 → face annotator
+            "tennis": "tennis",   # 传统视觉网球
+            "color": "color",     # 颜色识别
+        }
+        return {_map[k] for k in keys if k in _map}
 
     # ========================================================================
     # 内部：日志与状态
@@ -189,7 +233,12 @@ class ProgramRunner(threading.Thread):
         "love": "爱心", "wink": "眨眼", "laugh": "大笑",
         "thinking": "思考", "scared": "害怕", "confused": "困惑",
     }
-    TARGET_CN = {"face": "人脸", "tennis": "网球", "color": "颜色"}
+    TARGET_CN = {"face": "人脸", "tennis": "网球", "color": "自定义颜色"}
+    COLOR_CN = {
+        "red": "红色", "orange": "橙色", "yellow": "黄色",
+        "green": "绿色", "cyan": "青色", "blue": "蓝色",
+        "purple": "紫色", "custom": "自定义颜色",
+    }
 
     def __init__(self, ir: dict, runtime, service: BlockService,
                  max_runtime: float):
@@ -320,6 +369,36 @@ class ProgramRunner(threading.Thread):
             else:
                 self.service.log(
                     "info", f"没有看到{self.TARGET_CN.get(target, target)}")
+            return
+
+        if op == "if_sees_color":
+            color = node["color"]
+            label = self.COLOR_CN.get(color, color)
+            self.service.log_block(bid, f"检查是否看到{label}")
+            if self.runtime.sees_color(color):
+                self.service.log("info", f"看到了{label}")
+                self._exec_list(node.get("body") or [])
+            else:
+                self.service.log("info", f"没有看到{label}")
+                self._exec_list(node.get("else") or [])
+            return
+
+        if op == "color_track_start":
+            color = node["color"]
+            label = self.COLOR_CN.get(color, color)
+            ok = self.runtime.start_color_track(color)
+            if ok:
+                self.service.log_block(
+                    bid, f"开始追踪颜色：{label}")
+            else:
+                self.service.log_block(
+                    bid, f"追踪颜色 {label} 启动失败（云台/摄像头未就绪）")
+            self._sleep(0.2)
+            return
+
+        if op == "color_track_stop":
+            self.runtime.stop_color_track()
+            self.service.log_block(bid, "颜色追踪已停止")
             return
 
         if op == "repeat":

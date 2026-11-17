@@ -2,7 +2,6 @@
 """petcar/blocks/catalog.py — 积木目录
 =====================================
 前端用它生成 Blockly 积木定义和工具箱，后端用它做白名单校验。
-第一版只保留"简单运动 + 简单识别"。
 """
 
 from __future__ import annotations
@@ -43,7 +42,18 @@ EMOTIONS = [
 TARGETS = [
     ("人脸", "face"),
     ("网球", "tennis"),
-    ("颜色", "color"),
+    ("自定义颜色（面板设置）", "color"),
+]
+
+COLORS = [
+    ("红色", "red"),
+    ("橙色", "orange"),
+    ("黄色", "yellow"),
+    ("绿色", "green"),
+    ("青色", "cyan"),
+    ("蓝色", "blue"),
+    ("紫色", "purple"),
+    ("自定义颜色（面板设置）", "custom"),
 ]
 
 CATEGORIES = [
@@ -197,6 +207,52 @@ BLOCKS = [
             "tooltip": "看到目标时执行里面的积木",
         },
     },
+    # ---------- 颜色识别积木（P0）----------
+    {
+        "type": "if_sees_color",
+        "category": "sense",
+        "blockly": {
+            "type": "if_sees_color",
+            "message0": "如果看到 %1 那么 %2 否则 %3",
+            "args0": [
+                _dd("COLOR", COLORS),
+                {"type": "input_statement", "name": "DO"},
+                {"type": "input_statement", "name": "ELSE"},
+            ],
+            "previousStatement": None,
+            "nextStatement": None,
+            "colour": "#22c55e",
+            "tooltip": "看到指定颜色时执行上面一段，否则执行下面一段（否则可留空）",
+        },
+    },
+    # ---------- 颜色追踪积木（P1）----------
+    {
+        "type": "color_track_start",
+        "category": "sense",
+        "blockly": {
+            "type": "color_track_start",
+            "message0": "开始追踪颜色 %1",
+            "args0": [_dd("COLOR", COLORS)],
+            "previousStatement": None,
+            "nextStatement": None,
+            "inputsInline": True,
+            "colour": "#22c55e",
+            "tooltip": "云台自动转动，把该颜色保持在画面中心",
+        },
+    },
+    {
+        "type": "color_track_stop",
+        "category": "sense",
+        "blockly": {
+            "type": "color_track_stop",
+            "message0": "停止追踪颜色",
+            "previousStatement": None,
+            "nextStatement": None,
+            "colour": "#22c55e",
+            "tooltip": "停止颜色追踪",
+        },
+    },
+    # ---------- 控制 ----------
     {
         "type": "wait",
         "category": "control",
@@ -243,11 +299,18 @@ BLOCKS = [
 
 
 def get_schema() -> dict:
+    colors_for_frontend = [
+        {"key": v, "label": l} for l, v in COLORS
+    ]
     return {
         "version": 1,
         "categories": CATEGORIES,
         "blocks": BLOCKS,
+        "colors": colors_for_frontend,
     }
 
 
 BLOCK_TYPES = {b["type"] for b in BLOCKS}
+
+# 中文标签映射（解释器日志用）
+COLOR_LABEL = dict(COLORS)

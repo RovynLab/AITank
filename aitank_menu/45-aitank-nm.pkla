@@ -1,0 +1,6 @@
+[aitank 无密码 nmcli]
+Identity=unix-user:pi
+Action=org.freedesktop.NetworkManager.*
+ResultAny=no
+ResultInactive=no
+ResultActive=yes

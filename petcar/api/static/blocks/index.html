@@ -7,6 +7,7 @@
 <link rel="stylesheet" href="/static/blocks/style.css">
 <script src="/static/blocks/vendor/blockly/blockly_compressed.js"></script>
 <script src="/static/blocks/vendor/blockly/blocks_compressed.js"></script>
+<script src="/static/blocks/vendor/blockly/python_compressed.js"></script>
 <script src="/static/blocks/vendor/blockly/msg/zh-hans.js"></script>
 </head>
 <body>
@@ -18,8 +19,11 @@
     </div>
     <div class="top-actions">
       <button id="btn-new" class="btn ghost">新建</button>
+      <button id="btn-open" class="btn ghost">打开</button>
+      <button id="btn-save" class="btn ghost">保存</button>
       <button id="btn-import" class="btn ghost">导入</button>
       <button id="btn-export" class="btn ghost">导出</button>
+      <button id="btn-code-toggle-top" class="btn ghost">🐍 代码</button>
       <a class="btn ghost" href="/">返回中控</a>
       <span id="conn" class="conn off">连接中</span>
     </div>
@@ -29,8 +33,31 @@
     <section id="blocklyDiv" class="workspace"></section>
 
     <aside class="side">
-      <div class="video-wrap">
-        <img src="/api/video_feed" alt="小车画面" onerror="this.style.display='none'">
+      <!-- Python 代码预览 -->
+      <div class="code-section" id="codeSection">
+        <div class="code-header">
+          <span class="code-title">Python 代码（只读）</span>
+          <div class="code-actions">
+            <button id="btn-copy-code" class="btn btn-sm ghost" title="复制代码">📋</button>
+            <button id="btn-code-toggle" class="btn btn-sm ghost" title="隐藏/显示代码窗">▼</button>
+          </div>
+        </div>
+        <pre id="code-view" class="code-view"><code># 正在生成代码...</code></pre>
+      </div>
+
+      <!-- 视频区域 -->
+      <div class="video-section">
+        <div class="video-header">
+          <span class="video-title">实时画面</span>
+          <button id="btn-video-toggle" class="btn btn-sm ghost video-toggle">▶ 打开视频</button>
+        </div>
+        <div id="video-wrap" class="video-wrap hidden">
+          <img id="video-img" src="" alt="小车画面" onerror="this.style.display='none'">
+        </div>
+        <div id="video-off-placeholder" class="video-off">
+          <span>视频已关闭</span>
+          <span class="hint">点击右上角按钮打开</span>
+        </div>
       </div>
 
       <div class="run-row">
@@ -45,16 +72,62 @@
       </div>
 
       <div class="sees">
-        <span class="sees-label">识别</span>
+        <span class="sees-label">当前识别</span>
         <span id="see-face" class="chip">人脸</span>
         <span id="see-tennis" class="chip">网球</span>
-        <span id="see-color" class="chip">颜色</span>
+        <span id="color-chips"></span>
       </div>
 
-      <div class="console-title">控制台</div>
+      <div class="console-header">
+        <span class="console-title">控制台</span>
+        <button id="btn-clear-console" class="btn btn-sm ghost">清空</button>
+      </div>
       <div id="console" class="console"></div>
     </aside>
   </main>
+</div>
+
+<!-- 文件对话框 -->
+<div id="modal-mask" class="modal-mask hidden">
+  <div class="modal">
+    <div class="modal-header">
+      <span id="modal-title">文件管理</span>
+      <button id="modal-close" class="icon-btn">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="modal-tabs">
+        <button class="tab-btn active" data-tab="open">打开积木</button>
+        <button class="tab-btn" data-tab="save">保存到小车</button>
+      </div>
+
+      <!-- Open tab -->
+      <div id="tab-open" class="tab-panel active">
+        <div class="fs-section">
+          <div class="fs-title">🎁 板上示例（只读）</div>
+          <ul id="list-examples" class="fs-list"></ul>
+        </div>
+        <div class="fs-section">
+          <div class="fs-title">📁 我的积木</div>
+          <ul id="list-user" class="fs-list"></ul>
+        </div>
+      </div>
+
+      <!-- Save tab -->
+      <div id="tab-save" class="tab-panel">
+        <div class="form-row">
+          <label>文件名</label>
+          <input id="save-name" type="text" placeholder="我的红绿灯程序">
+        </div>
+        <div class="form-row">
+          <label>位置</label>
+          <span class="form-hint">保存到小车的用户目录（~/.aitank/blocks/user/）</span>
+        </div>
+        <div class="form-row">
+          <button id="btn-save-confirm" class="btn primary">确认保存</button>
+        </div>
+      </div>
+    </div>
+  </div>
 </div>
 
 <input type="file" id="fileInput" accept=".json,application/json" hidden>

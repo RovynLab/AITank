@@ -2,12 +2,13 @@
 """petcar/blocks/compiler.py — Blockly JSON → IR
 ================================================
 只接受白名单积木，输出解释器可直接执行的简单 AST。
-第一版不做变量、表达式、嵌套事件。
+不做变量、表达式、嵌套事件。
 """
 
 from __future__ import annotations
 
-from .catalog import BLOCK_TYPES, EMOTIONS, MOTIONS, PTZ_DIRS, TARGETS
+from .catalog import (BLOCK_TYPES, EMOTIONS, MOTIONS, PTZ_DIRS, TARGETS,
+                      COLORS)
 
 MAX_BLOCKS = 300
 MAX_DEPTH = 15
@@ -16,6 +17,7 @@ _MOTION_DIRS = {v for _, v in MOTIONS}
 _PTZ_DIRS = {v for _, v in PTZ_DIRS}
 _EMOTIONS = {v for _, v in EMOTIONS}
 _TARGETS = {v for _, v in TARGETS}
+_COLORS = {v for _, v in COLORS}
 
 
 class CompileError(Exception):
@@ -59,14 +61,15 @@ def _next_block(block: dict) -> dict | None:
 
 
 def _statement_body(block: dict, name: str, depth: int,
-                    counter: dict) -> list:
+                    counter: dict, ctx: dict) -> list:
     inputs = block.get("inputs") or {}
     slot = inputs.get(name) or {}
     first = slot.get("block") or slot.get("shadow")
-    return _compile_chain(first, depth + 1, counter)
+    return _compile_chain(first, depth + 1, counter, ctx)
 
 
-def _compile_chain(first: dict | None, depth: int, counter: dict) -> list:
+def _compile_chain(first: dict | None, depth: int, counter: dict,
+                   ctx: dict) -> list:
     body = []
     block = first
     while block:
@@ -75,12 +78,17 @@ def _compile_chain(first: dict | None, depth: int, counter: dict) -> list:
         counter["n"] += 1
         if counter["n"] > MAX_BLOCKS:
             _fail(block, f"积木太多了（最多 {MAX_BLOCKS} 块）")
-        body.append(_compile_block(block, depth, counter))
+        body.append(_compile_block(block, depth, counter, ctx))
         block = _next_block(block)
     return body
 
 
-def _compile_block(block: dict, depth: int, counter: dict) -> dict:
+def _record_color(ctx: dict, key: str):
+    ctx.setdefault("used_colors", set()).add(key)
+
+
+def _compile_block(block: dict, depth: int, counter: dict,
+                   ctx: dict) -> dict:
     btype = block.get("type")
     bid = block.get("id")
 
@@ -141,11 +149,45 @@ def _compile_block(block: dict, depth: int, counter: dict) -> dict:
         target = _field(block, "TARGET", "识别目标")
         if target not in _TARGETS:
             _fail(block, f"不支持的识别目标: {target}")
+        # "颜色" target 实际走 custom
+        if target == "color":
+            _record_color(ctx, "custom")
         return {
             "op": "if_sees",
             "id": bid,
             "target": target,
-            "body": _statement_body(block, "DO", depth, counter),
+            "body": _statement_body(block, "DO", depth, counter, ctx),
+        }
+
+    # ---------- 颜色识别新积木 ----------
+    if btype == "if_sees_color":
+        color = _field(block, "COLOR", "颜色")
+        if color not in _COLORS:
+            _fail(block, f"不支持的颜色: {color}")
+        _record_color(ctx, color)
+        return {
+            "op": "if_sees_color",
+            "id": bid,
+            "color": color,
+            "body": _statement_body(block, "DO", depth, counter, ctx),
+            "else": _statement_body(block, "ELSE", depth, counter, ctx),
+        }
+
+    if btype == "color_track_start":
+        color = _field(block, "COLOR", "颜色")
+        if color not in _COLORS:
+            _fail(block, f"不支持的颜色: {color}")
+        _record_color(ctx, color)
+        return {
+            "op": "color_track_start",
+            "id": bid,
+            "color": color,
+        }
+
+    if btype == "color_track_stop":
+        return {
+            "op": "color_track_stop",
+            "id": bid,
         }
 
     if btype == "repeat":
@@ -154,14 +196,14 @@ def _compile_block(block: dict, depth: int, counter: dict) -> dict:
             "op": "repeat",
             "id": bid,
             "times": times,
-            "body": _statement_body(block, "DO", depth, counter),
+            "body": _statement_body(block, "DO", depth, counter, ctx),
         }
 
     if btype == "forever":
         return {
             "op": "forever",
             "id": bid,
-            "body": _statement_body(block, "DO", depth, counter),
+            "body": _statement_body(block, "DO", depth, counter, ctx),
         }
 
     _fail(block, f"积木暂未实现: {btype}")
@@ -200,9 +242,13 @@ def compile_program(workspace: dict) -> dict:
         }])
 
     counter = {"n": 1}
-    body = _compile_chain(_next_block(starts[0]), 0, counter)
+    ctx = {"used_colors": set()}
+    body = _compile_chain(_next_block(starts[0]), 0, counter, ctx)
+
+    used_colors = sorted(ctx.get("used_colors") or set())
     return {
         "version": 1,
         "block_count": counter["n"],
+        "used_colors": used_colors,
         "hats": [{"event": "start", "body": body}],
     }

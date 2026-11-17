@@ -34,7 +34,7 @@ GROUPS = [
     {"id": "identity", "label": "🐾 身份",
      "desc": "决定机器人叫什么、什么性格、开机第一句话说什么。"},
     {"id": "llm", "label": "🧠 大模型",
-     "desc": "决定它用哪个模型思考。选 mock 可完全离线、秒回，适合只做指令控制。"},
+     "desc": "决定它用哪个模型思考。本地 Ollama 可完全离线，豆包需要联网。"},
     {"id": "voice", "label": "🎙️ 语音",
      "desc": "决定它怎么听、怎么说。听不清或声音奇怪时优先调这里。"},
 ]
@@ -64,11 +64,10 @@ SCHEMA = [
     # ---------------- LLM ----------------
     {"key": "llm_backend", "attr": "LLM_BACKEND", "group": "llm",
      "label": "LLM 后端", "type": "select",
-     "options": ["ollama", "doubao", "mock"],
-     "help": "mock = 本地规则秒回, 不依赖大模型",
+     "options": ["ollama", "doubao"],
+     "help": "ollama = 板子本地模型；doubao = 云端模型",
      "desc": "决定由谁生成回复。ollama：模型跑在板子本地，断网也能用，但速度较慢；"
-             "doubao：云端大模型，更聪明，需要联网并填写 API Key；"
-             "mock：不调用模型，用内置规则秒回，适合只做指令控制或现场演示。"},
+             "doubao：云端大模型，更聪明，需要联网并填写 API Key。"},
     {"key": "ollama_host", "attr": "OLLAMA_HOST", "group": "llm",
      "label": "Ollama 地址", "type": "text",
      "when": {"field": "llm_backend", "in": ["ollama"]},
@@ -81,7 +80,7 @@ SCHEMA = [
      "help": "如 qwen2.5:0.5b / qwen2.5:1.5b",
      "desc": "要使用的本地模型名称，必须是 Ollama 里已经下载过的名字。"
              "qwen2.5:0.5b 更快、占用小；qwen2.5:1.5b 更聪明但更吃内存。"
-             "名字填错时会自动回退到 mock。"},
+             "名字填错时对话会直接报错。"},
     {"key": "doubao_api_key", "attr": "DOUBAO_API_KEY", "group": "llm",
      "label": "豆包 API Key", "type": "password", "secret": True,
      "when": {"field": "llm_backend", "in": ["doubao"]},
@@ -119,12 +118,12 @@ SCHEMA = [
     # ---------------- 语音 ----------------
     {"key": "tts_mode", "attr": "TTS_MODE", "group": "voice",
      "label": "发音方式 (TTS)", "type": "select",
-     "options": ["edge", "piper", "espeak", "pyttsx3", "mock"],
+     "options": ["edge", "piper", "espeak", "pyttsx3"],
      "help": "edge = 云端自然童声（需联网）；piper = 本地离线童声；"
-             "espeak = 机械音兜底；mock = 只打印不发音",
+             "espeak = 机械音兜底",
      "desc": "机器人怎么发声。edge：微软云端自然童声，最像小朋友，但需要联网；"
              "piper：本地离线童声，断网也能说；espeak：系统机械音，作为兜底；"
-             "mock：不出声，只在日志里打印文字，适合排查问题。"},
+             "pyttsx3：系统自带语音引擎。"},
     {"key": "tts_voice", "attr": "TTS_VOICE", "group": "voice",
      "label": "edge 音色", "type": "text",
      "when": {"field": "tts_mode", "in": ["edge"]},
@@ -154,42 +153,27 @@ SCHEMA = [
      "step": 1, "when": {"field": "tts_mode", "in": ["edge"]}, "help": "超时自动降级本地 piper",
      "desc": "云端语音合成最多等多久。网络慢或超时会自动改用本地 piper，"
              "避免机器人突然不说话。网络不好时适当调大。"},
-    {"key": "asr_mode", "attr": "ASR_MODE", "group": "voice",
-     "label": "收音识别方式 (ASR)", "type": "select",
-     "options": ["whisper", "mock"], "restart": True,
-     "help": "whisper = 真实语音识别（需重启并加载模型）；"
-             "mock = 不收音，只用网页文字对话",
-     "desc": "机器人怎么听你说话。whisper：真实录音并识别，需要加载模型，启动较慢；"
-             "mock：不录音，只接受网页文字输入，适合快速演示。切换后需要重启服务。"},
-    {"key": "whisper_model", "attr": "WHISPER_MODEL", "group": "voice",
-     "label": "Whisper 模型", "type": "select",
-     "options": ["tiny", "base", "small", "medium"],
-     "when": {"field": "asr_mode", "in": ["whisper"]},
-     "restart": True, "help": "越大越准也越慢, 2GB 板推荐 base",
-     "desc": "语音识别模型的大小。tiny 最快但准确率低；base 平衡，2GB 内存的板子推荐；"
-             "small/medium 更准，但更占内存、启动更慢。切换后需要重启服务。"},
+    # 注意: WHISPER_MODEL 已移到独立 systemd 服务 aitank-whisper,
+    # 面板不再暴露此项, 改模型需 sudo systemctl edit aitank-whisper + restart
     {"key": "asr_device", "attr": "ASR_DEVICE", "group": "voice",
      "label": "麦克风设备", "type": "text",
-     "when": {"field": "asr_mode", "in": ["whisper"]},
      "help": "留空自动探测; 可填序号或名字片段",
      "desc": "用哪个麦克风收音。留空自动寻找 USB 麦克风；"
              "如果有多个麦克风，或机器人听不到声音，可以填设备序号（如 1）"
              "或名字片段（如 USB）。"},
     {"key": "vad_threshold_max", "attr": "VAD_THRESHOLD_MAX", "group": "voice",
      "label": "起录灵敏度上限", "type": "number", "min": 0.005, "max": 0.2,
-     "step": 0.005, "when": {"field": "asr_mode", "in": ["whisper"]}, "help": "越小越灵敏, 环境嘈杂时调大",
+     "step": 0.005, "help": "越小越灵敏, 环境嘈杂时调大",
      "desc": "多大声才算“开始说话”的上限。数值越小越灵敏，安静环境可调小；"
              "风扇、空调噪声大时调大，避免把噪声当成说话。"},
     {"key": "vad_speech_ms", "attr": "VAD_SPEECH_MS", "group": "voice",
      "label": "连续有声起录 (ms)", "type": "number", "min": 50, "max": 1000,
      "step": 50, "integer": True,
-     "when": {"field": "asr_mode", "in": ["whisper"]},
      "desc": "声音要连续持续多久才正式开录。太短容易把咳嗽、碰桌子当成说话；"
              "太长可能吃掉开头一两个字。200ms 适合大多数情况。"},
     {"key": "vad_silence_ms", "attr": "VAD_SILENCE_MS", "group": "voice",
      "label": "静音结束 (ms)", "type": "number", "min": 300, "max": 3000,
      "step": 100, "integer": True,
-     "when": {"field": "asr_mode", "in": ["whisper"]},
      "desc": "说完之后安静多久算一句话结束。太短会把句子截断，"
              "太长会让机器人反应变慢。一般 1000~1500ms。"},
 ]
@@ -213,8 +197,7 @@ ENV_KEYS = {
     "tts_device": "PETCAR_TTS_DEVICE",
     "piper_pitch": "PETCAR_PIPER_PITCH",
     "edge_timeout": "PETCAR_EDGE_TIMEOUT",
-    "asr_mode": "PETCAR_ASR_MODE",
-    "whisper_model": "PETCAR_WHISPER_MODEL",
+    # WHISPER_MODEL 已移到 aitank-whisper service, 不再在面板暴露
     "asr_device": "PETCAR_ASR_DEVICE",
     "vad_threshold_max": "PETCAR_VAD_THRESHOLD_MAX",
     "vad_speech_ms": "PETCAR_VAD_SPEECH_MS",

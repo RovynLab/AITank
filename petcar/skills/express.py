@@ -242,14 +242,18 @@ class ExpressionPlayer:
         self._halt(wait=False)
 
     # ------------------------------------------------------------------
-    def _halt(self, wait: bool):
+    def _halt(self, wait: bool) -> bool:
+        """中断当前动作。返回 True 表示确实有动作被中断了。"""
         with self._lock:
+            had_action = bool(self._thread and self._thread.is_alive())
+            if not had_action:
+                return False
             self._cancel.set()
-            thread = self._thread
             self._name = None
-        if wait and thread and thread is not threading.current_thread():
-            thread.join(timeout=0.6)
+        if wait and self._thread is not None:
+            self._thread.join(timeout=0.6)
         self._safe_stop()
+        return True
 
     def _safe_stop(self):
         if self.mecanum is not None:
@@ -382,7 +386,7 @@ class ExpressSkill(BaseSkill):
             return f"我还不会 '{action}' 这个动作呢"
 
         if self.player is None:
-            return f"(Mock) 我想{meta['label']}~"
+            return "底盘或云台未连接，无法执行动作"
 
         self.player.play(name)
         return f"好呀，我{meta['label']}给你看~"

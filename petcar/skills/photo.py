@@ -31,7 +31,7 @@ class PhotoSkill(BaseSkill):
 
     def execute(self) -> str:
         if self.camera is None:
-            return "(Mock) 咔嚓！照片会保存在 photos/ 目录下"
+            return "摄像头未连接，无法拍照"
         path = self.camera.take_photo()
         if path:
             return f"咔嚓！照片已保存: {path}"

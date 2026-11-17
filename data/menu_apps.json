@@ -1,0 +1,10 @@
+{
+  "apps": [
+    {
+      "id": "petcar_full",
+      "name": "PETCAR FULL",
+      "command": ["python3", "-m", "petcar.main"],
+      "env": {}
+    }
+  ]
+}

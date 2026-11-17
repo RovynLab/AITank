@@ -1,0 +1,68 @@
+{
+  "blocks": {
+    "languageVersion": 0,
+    "blocks": [{
+      "type": "event_start",
+      "id": "start",
+      "x": 40, "y": 40,
+      "next": {
+        "block": {
+          "type": "look",
+          "id": "look1",
+          "fields": { "DIR": "center", "DEGREES": 10 },
+          "next": {
+            "block": {
+              "type": "forever",
+              "id": "loop1",
+              "inputs": {
+                "DO": {
+                  "block": {
+                    "type": "if_sees_color",
+                    "id": "if1",
+                    "fields": { "COLOR": "green" },
+                    "inputs": {
+                      "DO": {
+                        "block": {
+                          "type": "move_stop",
+                          "id": "stop1",
+                          "next": {
+                            "block": {
+                              "type": "show_emotion",
+                              "id": "emo1",
+                              "fields": { "EMOTION": "happy" },
+                              "next": {
+                                "block": {
+                                  "type": "say",
+                                  "id": "say1",
+                                  "fields": { "TEXT": "找到绿色啦" }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      },
+                      "ELSE": {
+                        "block": {
+                          "type": "move_for",
+                          "id": "spin1",
+                          "fields": { "DIR": "spin", "SPEED": 150, "SECONDS": 0.25 },
+                          "next": {
+                            "block": {
+                              "type": "wait",
+                              "id": "wait1",
+                              "fields": { "SECONDS": 0.15 }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }]
+  }
+}
