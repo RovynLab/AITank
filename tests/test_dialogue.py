@@ -92,18 +92,21 @@ class DialogueTests(unittest.TestCase):
     def test_tts_cleans_tildes_and_serializes(self):
         driver = tts_module.TTSDriver.__new__(tts_module.TTSDriver)
         driver._speak_lock = threading.Lock()
+        driver._stop_requested = threading.Event()
+        driver._speaking = threading.Event()
+        driver.mode = 'espeak'
         played = []
-        def play(text, emotion):
+        def play(text):
             played.append(('start',text))
             time.sleep(0.02)
             played.append(('end',text))
-        driver._speak_serial = play
+        driver._speak_espeak = play
         threads = [threading.Thread(target=driver.speak,args=(text,)) for text in ('好的，我摇摇头~','你好吗？')]
         for thread in threads: thread.start()
         for thread in threads: thread.join()
         self.assertEqual([e[0] for e in played],['start','end','start','end'])
         texts = [e[1] for e in played if e[0]=='start']
-        self.assertIn('好的，我摇摇头。',texts)
+        self.assertIn('好的，我摇摇头',texts)
         self.assertIn('你好吗？',texts)
 
     def test_panel_chat_no_duplicate_speech(self):

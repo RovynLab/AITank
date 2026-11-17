@@ -281,26 +281,27 @@ class TTSDriver:
             return
         text = text[:100]
 
-        self._stop_requested.clear()
-        self._speaking.set()
-        try:
-            if self._stop_requested.is_set():
-                return
-            if self.mode == "edge":
-                # 云端童声 → 断网/超时降级本地 piper → 最后才用 espeak
-                if not self._speak_edge(text) and not self._speak_piper(text):
-                    if not self._stop_requested.is_set():
-                        self._speak_espeak(text)
-            elif self.mode == "piper":
-                if not self._speak_piper(text):
-                    if not self._stop_requested.is_set():
-                        self._speak_espeak(text)
-            elif self.mode == "espeak":
-                self._speak_espeak(text)
-            elif self.mode == "pyttsx3":
-                self._speak_pyttsx3(text)
-        finally:
-            self._speaking.clear()
+        with self._speak_lock:
+            self._stop_requested.clear()
+            self._speaking.set()
+            try:
+                if self._stop_requested.is_set():
+                    return
+                if self.mode == "edge":
+                    # 云端童声 → 断网/超时降级本地 piper → 最后才用 espeak
+                    if not self._speak_edge(text) and not self._speak_piper(text):
+                        if not self._stop_requested.is_set():
+                            self._speak_espeak(text)
+                elif self.mode == "piper":
+                    if not self._speak_piper(text):
+                        if not self._stop_requested.is_set():
+                            self._speak_espeak(text)
+                elif self.mode == "espeak":
+                    self._speak_espeak(text)
+                elif self.mode == "pyttsx3":
+                    self._speak_pyttsx3(text)
+            finally:
+                self._speaking.clear()
 
     def is_speaking(self) -> bool:
         return self._speaking.is_set()

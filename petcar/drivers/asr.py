@@ -233,7 +233,9 @@ class ASRDriver:
             if not interactive:
                 # 自动录音: 前 1s 采环境噪音定阈值, 听到人声才开始录,
                 # 静音 1.2s 结束 (只留 0.3s 前置缓冲, 避免把整段静音丢给 whisper)
-                speech_ms = silence_ms = 0
+                gate = _SpeechGate(config.VAD_THRESHOLD_MAX,
+                                   config.VAD_SPEECH_MS,
+                                   config.VAD_SILENCE_MS)
                 baseline = []
                 preroll = []
                 threshold = gate.threshold
@@ -259,16 +261,12 @@ class ASRDriver:
                         rms = float(np.sqrt(np.mean(
                             (data.astype(np.float32) / 32768.0) ** 2)))
                         peak = max(peak, rms)
+                        state = gate.feed(rms, 100)
                         if len(baseline) < 10:   # 10 次 = 1s, 更稳定的环境噪音基线
                             baseline.append(rms)
                             threshold = min(config.VAD_THRESHOLD_MAX,
                                             max(0.005,
                                                 sum(baseline) / len(baseline) * 1.8))
-                            # baseline 还没采够时顺便把 preroll 也填满
-                            preroll.append(data.copy())
-                            if len(preroll) > 3:
-                                preroll.pop(0)
-                            continue
                         if not started:
                             preroll.append(data.copy())
                             if len(preroll) > 8:

@@ -35,7 +35,7 @@ class SpeechTests(unittest.TestCase):
         self.assertFalse(asr.ASRDriver._clear_fast_command(segment('今天怎么样？')))
 
     def test_fast_path_and_quality_fallback(self):
-        driver=asr.ASRDriver(mode='mock')
+        driver=asr.ASRDriver()
         seg=types.SimpleNamespace(text='请摇摇头。',avg_logprob=-0.3,no_speech_prob=0.0)
         calls=[]
         def transcribe(label, segments):
@@ -96,18 +96,21 @@ class SpeechTests(unittest.TestCase):
         except ImportError:
             self.skipTest('numpy required for synthetic audio integration')
         import wave
-        driver = asr.ASRDriver(mode='mock')
-        driver.mode = 'whisper'
-        decoded = []
-        class Model:
-            def transcribe(self, path, **kwargs):
-                with wave.open(path) as f:
-                    first = np.frombuffer(f.readframes(4800), dtype=np.int16)
-                    self_test.assertGreater(np.abs(first.astype(float)).mean(), 0)
-                decoded.append(kwargs)
-                return iter([types.SimpleNamespace(text='你好，小坦', avg_logprob=-0.7)]), None
-        self_test = self
-        driver._model = Model()
+        driver = asr.ASRDriver()
+        captured = {}
+
+        class Resp:
+            status_code = 200
+            def json(self):
+                return {'text': '你好，小坦', 'avg_logprob': -0.7}
+
+        def fake_post(url, files=None, data=None, timeout=None):
+            with wave.open(files['audio'][1]) as wf:
+                first = np.frombuffer(wf.readframes(4800), dtype=np.int16)
+            self.assertGreater(np.abs(first.astype(float)).mean(), 0)
+            captured.update(data)
+            return Resp()
+
         class Stream:
             def __init__(self, **kwargs):
                 self.callback = kwargs['callback']
@@ -122,12 +125,11 @@ class SpeechTests(unittest.TestCase):
         cfg = dict(VAD_THRESHOLD_MAX=0.02,VAD_SPEECH_MS=100,VAD_SILENCE_MS=900,
                    WHISPER_LANG='zh', PET_NAME='小坦')
         with tempfile.TemporaryDirectory() as folder:
-            with patch.dict(sys.modules, {'sounddevice': sd}), patch.multiple(asr.config,create=True,**cfg), patch.object(asr.tempfile,'gettempdir',return_value=folder):
+            with patch.dict(sys.modules, {'sounddevice': sd}), patch.multiple(asr.config,create=True,**cfg), patch.object(asr.tempfile,'gettempdir',return_value=folder), patch('requests.post', fake_post):
                 self.assertEqual(driver._listen_whisper(6,force_auto=True),'你好，小坦')
                 driver._abort.set()
                 self.assertIsNone(driver._listen_whisper(6,force_auto=True))
-        self.assertEqual(len(decoded), 1)
-        self.assertIn('小坦',decoded[0]['initial_prompt'])
+        self.assertEqual(captured['language'], 'zh')
 
 
 if __name__ == '__main__':

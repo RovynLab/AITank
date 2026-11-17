@@ -113,6 +113,8 @@ class PIDTracker:
         self.running = False
         self._thread = None
         self._lock = threading.Lock()
+        self._axis_x = _ServoAxis()
+        self._axis_y = _ServoAxis()
         self._exs = 0.0
         self._eys = 0.0
         self.err_x = 0.0

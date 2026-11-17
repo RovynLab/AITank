@@ -204,17 +204,17 @@ def create_app(chat=None, emotion=None, mecanum=None, ptz=None, camera=None,
 
         def _dnn_all(frame):
             with _dnn_lock:
-            c = _dnn_cache
-            if c["m"] == "uninit":
-                try:
-                    c["m"] = get_detector(log=lambda msg: log.add("sys", msg))
-                except Exception as e:
-                    c["m"] = None
-                    log.add("sys", f"检测器不可用: {e}")
-            if c["m"] is None:
-                return []
+                c = _dnn_cache
+                if c["m"] == "uninit":
+                    try:
+                        c["m"] = get_detector(log=lambda msg: log.add("sys", msg))
+                    except Exception as e:
+                        c["m"] = None
+                        log.add("sys", f"检测器不可用: {e}")
+                if c["m"] is None:
+                    return []
                 if frame is c["frame"]:
-                return c["raw"]
+                    return c["raw"]
                 try:
                     raw = c["m"].detect(frame)
                 except Exception:
@@ -347,13 +347,16 @@ def create_app(chat=None, emotion=None, mecanum=None, ptz=None, camera=None,
         annotators["color"] = {
             "label": "颜色",
             "tag": "color",
-            "color": (255, 80, 80),
+            "color": (0, 220, 220),
             "enabled": False,
-            "detect": lambda frame: [
-                (int(b["box"][0]), int(b["box"][1]),
-                 int(b["box"][2]), int(b["box"][3]), float(b["area"]))
-                for b in (_recent_color_boxes() or [])
-            ],
+            # 积木运行中优先用 PerceptionCache 的颜色块; 否则用 HSV 实时检测
+            "detect": lambda frame: (
+                [(int(b["box"][0]), int(b["box"][1]),
+                  int(b["box"][2]), int(b["box"][3]), float(b["area"]))
+                 for b in (_recent_color_boxes() or [])]
+                or [(x, y, w, h, s)
+                    for x, y, w, h, s, _ in detect_color(frame, cc.get_custom())]
+            ),
         }
         # helper: 从 PerceptionCache 拿最近颜色块位置
         def _recent_color_boxes():
@@ -960,7 +963,7 @@ def create_app(chat=None, emotion=None, mecanum=None, ptz=None, camera=None,
                         emotion.set_emotion(resp.emotion)
                     voice_job["stage"] = "speaking_reply"
                     if not resp.reply_spoken:
-                    tts.speak(resp.reply, resp.emotion)
+                        tts.speak(resp.reply, resp.emotion)
                 log.add("voice_test",
                         f"识别: {text or '(没听清)'} | 峰值 {voice_job['peak']} "
                         f"阈值 {voice_job['threshold']}")

@@ -37,9 +37,10 @@ class RuntimeSettingsTests(unittest.TestCase):
 
     def test_validated_settings_persist_and_reload(self):
         self.path.write_text('{"preserved":"yes"}',encoding='utf-8')
-        result=runtime_config.update({'pet_name':'小坦','vad_silence_ms':600,'whisper_model':'base'})
+        result=runtime_config.update({'pet_name':'小坦','vad_silence_ms':600})
         self.assertFalse(result['errors'])
-        self.assertIn('whisper_model',result['restart'])
+        removed=runtime_config.update({'whisper_model':'base'})
+        self.assertIn('whisper_model',removed['errors'])
         self.assertEqual(json.loads(self.path.read_text(encoding='utf-8'))['preserved'],'yes')
         config.PET_NAME='临时'
         runtime_config.load()
