@@ -285,12 +285,16 @@ def create_app(chat=None, emotion=None, mecanum=None, ptz=None, camera=None,
             if action == "start":
                 if _blocks_busy():
                     return jsonify({"ok": False, "error": "程序正在运行, 请先停止"}), 409
+                if d.get("target") == "color":
+                    pid_tracker.set_target_color(d.get("color_key") or "custom")
                 pid_tracker.set_params(kp=d.get("kp"), ki=d.get("ki"),
                                        kd=d.get("kd"), target=d.get("target"))
                 pid_tracker.start()
             elif action == "stop":
                 pid_tracker.stop()
             elif action == "params":
+                if d.get("target") == "color" and d.get("color_key"):
+                    pid_tracker.set_target_color(d.get("color_key"))
                 pid_tracker.set_params(kp=d.get("kp"), ki=d.get("ki"),
                                        kd=d.get("kd"), target=d.get("target"))
         return jsonify({"ok": True, **pid_tracker.status()})

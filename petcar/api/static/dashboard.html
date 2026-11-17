@@ -1346,12 +1346,12 @@ function pidInput() {
 }
 function pidPushParams() {   // 运行中也可实时调参
   api('/api/track', {method:'POST', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({action:'params', ...pidVals(), target:pidTgt})})
+    body: JSON.stringify({action:'params', ...pidVals(), target:pidTgt, color_key:'custom'})})
     .then(pidSync).catch(() => {});
 }
 function pidToggle() {
   const body = pidRunning ? {action:'stop'}
-                          : {action:'start', ...pidVals(), target:pidTgt};
+                          : {action:'start', ...pidVals(), target:pidTgt, color_key:'custom'};
   api('/api/track', {method:'POST', headers:{'Content-Type':'application/json'},
                      body: JSON.stringify(body)})
     .then(pidSync)
