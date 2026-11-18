@@ -8,6 +8,8 @@ Current projects: a mecanum AI car with pan-tilt camera + LLM dialogue, an OpenC
 
 Every project ships with progressive labs, self-contained code, and zero proprietary lock-in. No black boxes. If the robot does something, you can read the code that makes it happen — and modify it to make it yours.
 
+![RovynLab — Mecanum AI Car](./aitank.png)
+
 ---
 
 ## Hardware
